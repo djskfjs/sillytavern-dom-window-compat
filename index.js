@@ -166,6 +166,7 @@ export function disable() { return disposeExtension(); }
   const helperLifecycle = createHelperLifecycle({ getRoot: getChatEl, getHelper: () => window.TavernHelper, getContext: getCtx });
   const movingWindow = createMovingWindow({ state, config, getRoot: getChatEl, getChat, mountMessage, renderQueue,
     refreshMessages: refreshMountedMessages, lifecycle: helperLifecycle,
+    onRangeChanged: () => updateStatusPanel(),
     onFailure: error => {
       state.lastRenderError = '窗口恢复失败，已关闭并恢复普通展示。';
       console.warn(LOG, state.lastRenderError, error?.name);
@@ -436,6 +437,7 @@ export function disable() { return disposeExtension(); }
 
     bindEvents();
     apply();
+    updateStatusPanel();
     return true;
   }
 
