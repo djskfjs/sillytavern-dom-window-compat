@@ -1,25 +1,35 @@
 /**
- * DOM Window 0.4.2
+ * DOM Window 0.4.3-compat.1 — local compatibility test build
  *
  * 只窗口化 ST 的消息 DOM，不改 chat 数据。
  * - chat 数组保持完整，AI 上下文、存档、消息 ID 不变。
  * - #chat 里只保留视口附近的 .mes，远处用上下占位撑住滚动高度。
  * - 最后一条消息固定挂载，保证 .last_mes 相关功能正常。
- * - 默认不启用，控制台执行 STDOMWindow.enable() 或 localStorage.STDOMWindow = '1'。
+ * - 默认不启用；兼容版使用独立开关，不继承原版的自动开启状态。
  *
  * 兼容接口：
  * - STDOMWindow.getChat() 返回完整 chat
  * - STDOMWindow.getMessageElement(mesid) 按需挂载某一层
  */
+import { createRenderQueue } from './render-queue.js';
+
+let disposeExtension = () => {};
+export function disable() { return disposeExtension(); }
+
 (() => {
   'use strict';
 
-  const VERSION = '0.4.2';
+  const VERSION = '0.4.3-compat.1';
   const LOG = '[DOMWindow]';
+  let extensionDisposed = false;
+  if (window.STDOMWindow) {
+    console.warn(LOG, '检测到另一个 DOM Window 实例，兼容版未重复加载。请只启用一个版本。');
+    return;
+  }
   const EXTENSION_BASE = new URL('.', import.meta.url).href;
-  const STORAGE_KEY = 'STDOMWindow';
-  const TRUNCATION_KEY = 'STDOMWindow.originalTruncation';
-  const PRELOAD_KEY = 'STDOMWindow.preload';
+  const STORAGE_KEY = 'STDOMWindow.compat.enabled';
+  const TRUNCATION_KEY = 'STDOMWindow.compat.originalTruncation';
+  const PRELOAD_KEY = 'STDOMWindow.compat.preload';
   const DEFAULT_PRELOAD = 5;
   const MAX_PRELOAD = 100;
   const FALLBACK_EVENTS = {
@@ -70,6 +80,10 @@
     // 漏判一次就会重排，重排又刷新，形成源码/渲染来回闪的死循环。
     selfRenders: new Map(),
     sweepTimer: 0,
+    scrollRevision: 0,
+    enableTimer: 0,
+    autoStartTimer: 0,
+    lastRenderError: '',
   };
 
   const SELF_RENDER_TTL = 20000;
@@ -114,6 +128,48 @@
   // 酒馆自己渲染的新楼层已经完整拉过一次界面，再刷新就是白白闪一次。
   const mountedByUs = new WeakSet();
 
+  const renderQueue = createRenderQueue({
+    getRoot: getChatEl,
+    getChat,
+    refresh: (id, element) => {
+      const helper = window.TavernHelper;
+      if (typeof helper?.refreshOneMessage !== 'function') {
+        throw new Error('未找到酒馆助手的楼层刷新接口');
+      }
+      return helper.refreshOneMessage(id, window.jQuery ? window.jQuery(element) : undefined);
+    },
+    markSelfRender: id => {
+      state.selfRenders.set(Number(id), Date.now() + SELF_RENDER_TTL);
+      armSweep();
+    },
+    beforeRefresh: () => {
+      if (!state.enabled) return null;
+      const root = getChatEl();
+      const top = root.getBoundingClientRect().top;
+      const element = [...root.querySelectorAll(':scope > .mes')]
+        .find(el => el.getBoundingClientRect().bottom > top);
+      return { element, top: element?.getBoundingClientRect().top,
+        atBottom: root.scrollHeight - root.scrollTop - root.clientHeight < 40,
+        revision: state.scrollRevision };
+    },
+    afterRefresh: (_item, anchor) => {
+      if (!state.enabled) return;
+      measureMounted();
+      updateSpacers();
+      if (!anchor || anchor.revision !== state.scrollRevision) return;
+      const root = getChatEl();
+      if (anchor.atBottom) root.scrollTop = root.scrollHeight;
+      else if (anchor.element?.isConnected && anchor.top !== undefined) {
+        root.scrollTop += anchor.element.getBoundingClientRect().top - anchor.top;
+      }
+    },
+    onError: (id, error) => {
+      state.lastRenderError = `第 ${id} 层前端恢复失败（${error?.name || 'Error'}），可关闭窗口模式重新进入。`;
+      console.warn(LOG, '前端恢复失败', id, error?.name || 'Error');
+      updateStatusPanel();
+    },
+  });
+
   function mountMessage(id, { beforeId, afterId } = {}) {
     const ctx = getCtx();
     const mes = ctx?.chat?.[id];
@@ -126,49 +182,30 @@
     if (typeof beforeId === 'number') opts.insertBefore = beforeId;
     else if (typeof afterId === 'number') opts.insertAfter = afterId;
     const result = ctx.addOneMessage(mes, opts);
-    const el = result?.[0] || result?.get?.(0) || null;
-    if (el) mountedByUs.add(el);
+    // ST 1.14 mounts the element but returns undefined; 1.18 returns jQuery.
+    const el = result?.[0] || result?.get?.(0) ||
+      getChatEl()?.querySelector(`:scope > .mes[mesid="${id}"]`) || null;
+    if (el) {
+      // Old ST versions treated insertion next to message 0 as a falsy option.
+      const root = getChatEl();
+      const before = typeof beforeId === 'number' ? root.querySelector(`:scope > .mes[mesid="${beforeId}"]`) : null;
+      const after = typeof afterId === 'number' ? root.querySelector(`:scope > .mes[mesid="${afterId}"]`) : null;
+      if (before && before !== el) before.before(el);
+      else if (after && after !== el) after.after(el);
+      const tail = root.querySelector(`:scope > .mes[mesid="${getChat().length - 1}"]`);
+      if (tail && !tail.classList.contains('last_mes')) {
+        root.querySelectorAll('.last_mes').forEach(node => node.classList.remove('last_mes'));
+        tail.classList.add('last_mes');
+      }
+      mountedByUs.add(el);
+    }
     return el ? { el, created: true } : null;
   }
 
   // addOneMessage 只重建正文，不会补发消息渲染事件；酒馆助手的楼层界面
   // 依赖该事件生成 iframe，所以重新挂载后要主动刷新一次。
-  function hasFrontendBlock(mes) {
-    const text = String(mes?.mes || '');
-    return /PlaceHolder|<html[\s>]|<head[\s>]|<body[\s>]/i.test(text);
-  }
-
   function refreshMountedMessages(ids, { force = false } = {}) {
-    const helper = window.TavernHelper;
-    const refresh = helper?.refreshOneMessage;
-    if (typeof refresh !== 'function') return;
-
-    // 默认只刷新自己挂上去的楼层。酒馆自己渲染的新楼层界面是完整的，
-    // 再刷一次等于让用户多看见一闪。
-    // force 用于关闭窗口后的全量恢复：那时楼层已被 printMessages 重印，
-    // 不出自本插件，但界面确实需要补回来。
-    const targets = ids.filter(id => {
-      if (!hasFrontendBlock(getChat()[id])) return false;
-      if (force) return true;
-      const el = getChatEl()?.querySelector(`:scope > .mes[mesid="${id}"]`);
-      return el ? mountedByUs.has(el) : false;
-    });
-    if (!targets.length) return;
-
-    // 刷新会补发 message_rendered，事件是异步派发的；按楼层号记下过期时刻，
-    // 避免 DOMWindow 把自己的补渲染当成外部更新又重排一次。
-    const expires = Date.now() + SELF_RENDER_TTL;
-    for (const id of targets) state.selfRenders.set(Number(id), expires);
-    armSweep();
-
-    for (const id of targets) {
-      safe(() => {
-        const promise = refresh.call(helper, id);
-        if (promise?.catch) {
-          promise.catch(err => console.warn(LOG, 'refresh message', id, err));
-        }
-      }, 'refresh message');
-    }
+    renderQueue.enqueue(ids, { force, owns: element => mountedByUs.has(element) });
   }
 
   // 每条自刷新独立记时（不是整批共用一个定时器），过期后清掉，避免长期占用内存。
@@ -189,6 +226,7 @@
   }
 
   function isSelfRender(id) {
+    if (renderQueue.isRendering(id)) return true;
     const key = Number(id);
     const expires = state.selfRenders.get(key);
     if (expires == null) return false;
@@ -292,43 +330,56 @@
     if (!force && windowMatchesChat()) return false;
 
     state.applying = true;
-    state.chatEl = chatEl;
-    state.pinnedId = chat.length - 1;
-    state.heights.clear();
-    clearWindow();
+    renderQueue.cancel();
+    clearSelfRenders();
+    state.lastRenderError = '';
+    try {
+      state.chatEl = chatEl;
+      state.pinnedId = chat.length - 1;
+      state.heights.clear();
+      clearWindow();
 
-    const start = Math.max(0, state.pinnedId - (config.minWindow - 1));
-    const end = state.pinnedId - 1;
-    state.start = start;
-    state.end = end;
+      const start = Math.max(0, state.pinnedId - (config.minWindow - 1));
+      const end = state.pinnedId - 1;
+      state.start = start;
+      state.end = end;
 
-    // created=false 的是酒馆已经挂好的楼层，界面完整，不需要再刷新
-    const mountedIds = [];
-    const collect = (id) => {
-      const res = mountMessage(id);
-      if (res?.created) mountedIds.push(id);
-      return !!res;
-    };
-    for (let i = start; i <= end; i++) collect(i);
-    collect(state.pinnedId);
-    refreshMountedMessages(mountedIds);
+      // created=false 的是酒馆已经挂好的楼层，界面完整，不需要再刷新
+      const mountedIds = [];
+      const collect = (id) => {
+        const res = mountMessage(id);
+        if (res?.created) mountedIds.push(id);
+        return !!res;
+      };
+      for (let i = start; i <= end; i++) collect(i);
+      collect(state.pinnedId);
+      refreshMountedMessages(mountedIds);
 
-    state.topSpacer = createSpacer('top');
-    chatEl.prepend(state.topSpacer);
+      state.topSpacer = createSpacer('top');
+      chatEl.prepend(state.topSpacer);
 
-    state.bottomSpacer = createSpacer('bottom');
-    const pinnedEl = chatEl.querySelector(`.mes[mesid="${state.pinnedId}"]`);
-    if (pinnedEl) pinnedEl.before(state.bottomSpacer);
-    else chatEl.append(state.bottomSpacer);
+      state.bottomSpacer = createSpacer('bottom');
+      const pinnedEl = chatEl.querySelector(`.mes[mesid="${state.pinnedId}"]`);
+      if (pinnedEl) pinnedEl.before(state.bottomSpacer);
+      else chatEl.append(state.bottomSpacer);
 
-    measureMounted();
-    updateSpacers();
-    chatEl.scrollTop = chatEl.scrollHeight;
-    state.applying = false;
-    state.mounted = true;
-    state.tailRef = chat[state.pinnedId] ?? null;
-    log('applied', { chatLength: chat.length, start, end, pinnedId: state.pinnedId });
-    return true;
+      measureMounted();
+      updateSpacers();
+      chatEl.scrollTop = chatEl.scrollHeight;
+      state.applying = false;
+      state.mounted = true;
+      state.tailRef = chat[state.pinnedId] ?? null;
+      log('applied', { chatLength: chat.length, start, end, pinnedId: state.pinnedId });
+      return true;
+    } catch (error) {
+      console.warn(LOG, '窗口挂载失败', error?.name || 'Error');
+      state.applying = false;
+      disable();
+      window.toastr?.warning('窗口挂载失败，已关闭 DOM Window 并恢复普通展示。');
+      return false;
+    } finally {
+      state.applying = false;
+    }
   }
 
   function scheduleApply(delay = 120, force = false) {
@@ -503,6 +554,8 @@
 
   function onScroll() {
     if (!state.enabled || state.applying) return;
+    state.scrollRevision++;
+    renderQueue.defer();
     if (state.scrollRaf) return;
     state.scrollRaf = requestAnimationFrame(() => {
       state.scrollRaf = 0;
@@ -589,12 +642,14 @@
     });
     on('MESSAGE_DELETED', () => scheduleApply(250));
     on('MORE_MESSAGES_LOADED', () => scheduleApply(250));
-    on('MESSAGE_UPDATED', () => {
+    on('MESSAGE_UPDATED', id => {
+      refreshMountedMessages([id]);
       measureMounted();
       updateSpacers();
       checkWindowIntegrity();
     });
-    on('MESSAGE_SWIPED', () => {
+    on('MESSAGE_SWIPED', id => {
+      refreshMountedMessages([id]);
       measureMounted();
       updateSpacers();
       checkWindowIntegrity();
@@ -618,10 +673,12 @@
   }
 
   function enable(options = {}) {
+    if (extensionDisposed) return false;
     if (state.enabled) return true;
     const ctx = getCtx();
     if (!ctx?.chat) {
-      setTimeout(() => enable(options), 200);
+      clearTimeout(state.enableTimer);
+      state.enableTimer = setTimeout(() => { state.enableTimer = 0; enable(options); }, 200);
       return false;
     }
 
@@ -648,16 +705,23 @@
   }
 
   function disable() {
+    clearTimeout(state.enableTimer);
+    state.enableTimer = 0;
+    clearTimeout(state.autoStartTimer);
+    state.autoStartTimer = 0;
     if (!state.enabled) return;
     state.enabled = false;
+    renderQueue.cancel();
     clearSelfRenders();
     clearTimeout(state.applyTimer);
     state.applyTimer = 0;
+    state.forceApply = false;
     if (state.scrollRaf) cancelAnimationFrame(state.scrollRaf);
     state.scrollRaf = 0;
     unbindEvents();
     clearWindow();
     state.mounted = false;
+    state.heights.clear();
 
     const ctx = getCtx();
     let restore = state.originalTruncation;
@@ -693,6 +757,7 @@
       heightCache: state.heights.size,
       domNodes: document.querySelectorAll('*').length,
       lastMes: chatEl?.querySelector('.last_mes')?.getAttribute('mesid') ?? null,
+      renderQueue: renderQueue.snapshot(),
     };
   }
 
@@ -746,14 +811,16 @@
   }
 
   async function initSettingsPanel() {
-    if (document.getElementById('dom_window_settings')) return;
+    if (extensionDisposed || document.getElementById('dom_window_settings')) return;
     const container = document.getElementById('extensions_settings');
     if (!container) return;
 
     try {
       const response = await fetch(`${EXTENSION_BASE}settings.html`, { cache: 'no-store' });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      container.insertAdjacentHTML('beforeend', await response.text());
+      const html = await response.text();
+      if (extensionDisposed) return;
+      container.insertAdjacentHTML('beforeend', html);
 
       const checkbox = document.getElementById('dom_window_autostart');
       if (!checkbox) return;
@@ -820,6 +887,7 @@
     const active = enabled && state.mounted && state.pinnedId != null && state.pinnedId >= 0;
     const range = active ? `${state.start}–${state.pinnedId}（${mounted} 层）` : '—';
     const memory = performance.memory?.usedJSHeapSize;
+    const queue = renderQueue.snapshot();
     const nodes = document.getElementsByTagName('*').length;
     const stateText = !enabled ? '已关闭' : active ? '已开启' : '等待挂载';
 
@@ -828,17 +896,34 @@
     document.getElementById('dom_window_state').textContent = stateText;
     statusEl.dataset.enabled = String(enabled);
     document.getElementById('dom_window_metrics').textContent =
-      `窗口 ${range} · 已加载 ${mounted}/${chat.length} 层\nDOM ${nodes} · 堆内存 ${formatMemory(memory)}`;
+      `窗口 ${range} · 已加载 ${mounted}/${chat.length} 层\nDOM ${nodes} · 堆内存 ${formatMemory(memory)}` +
+      `\n前端恢复：运行 ${queue.running} · 等待 ${queue.pending}` +
+      (state.lastRenderError ? `\n${state.lastRenderError}` : '');
 
     const badge = document.getElementById('dom_window_header_state');
     if (badge) badge.textContent = !enabled ? '已关闭' : active ? `已开启 · ${mounted} 层` : '等待挂载';
   }
 
-  setInterval(updateStatusPanel, 1000);
+  const statusInterval = setInterval(() => {
+    if (!document.hidden) updateStatusPanel();
+  }, 1000);
   updateStatusPanel();
 
+  disposeExtension = () => {
+    extensionDisposed = true;
+    disable();
+    clearInterval(statusInterval);
+    document.getElementById('dom_window_settings')?.remove();
+    // Restore renders are allowed to finish before the queue is disposed.
+    return renderQueue.whenIdle().then(() => {
+      renderQueue.dispose();
+      if (window.STDOMWindow === api) delete window.STDOMWindow;
+    });
+  };
+
   if (location.search.includes('domwindow=1') || isAutoEnabled()) {
-    setTimeout(() => {
+    state.autoStartTimer = setTimeout(() => {
+      state.autoStartTimer = 0;
       if (location.search.includes('domwindow=1') || isAutoEnabled()) {
         enable(getAutoOptions());
       }

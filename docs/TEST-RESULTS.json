@@ -1,0 +1,54 @@
+{
+  "date": "2026-11-04T07:56:48.405Z",
+  "engine": "Chrome headless",
+  "findings": [
+    {
+      "case": "原版：复现原始消息无HTML标记时的前端漏渲染",
+      "result": "confirmed",
+      "frames": 0
+    },
+    {
+      "case": "modern API：上翻/回底/关闭恢复，数据不变",
+      "result": "passed",
+      "maxConcurrent": 1
+    },
+    {
+      "case": "legacy API：上翻/回底/关闭恢复，数据不变",
+      "result": "passed",
+      "maxConcurrent": 1
+    },
+    {
+      "case": "2601层：快速上下滚动、静止无循环",
+      "result": "passed",
+      "mounted": 14,
+      "discarded": 336,
+      "maxConcurrent": 1
+    },
+    {
+      "case": "补渲染过程中切换聊天，旧任务不污染新聊天",
+      "result": "passed",
+      "discarded": 7
+    },
+    {
+      "case": "新消息增量追加，不整窗重建",
+      "result": "passed"
+    },
+    {
+      "case": "单层前端失败后继续处理其他楼层，解除等待遮罩",
+      "result": "passed"
+    },
+    {
+      "case": "窗口挂载异常时关闭窗口模式并恢复普通展示",
+      "result": "passed"
+    },
+    {
+      "case": "旧版开关不自动继承，重复加载不覆盖运行实例",
+      "result": "passed"
+    },
+    {
+      "case": "停用扩展清理接口和面板，重新加载可正常开启",
+      "result": "passed"
+    }
+  ],
+  "limitation": "合成聊天和模拟酒馆助手；不等同于真实 iOS Safari 或真实前端长期测试"
+}

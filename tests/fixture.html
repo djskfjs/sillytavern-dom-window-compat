@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>DOM Window 兼容测试</title>
+  <link rel="stylesheet" href="/extension/style.css">
+  <style>
+    *{box-sizing:border-box}body{margin:0;background:#202332;color:#edf1ff;font:16px system-ui}
+    header{padding:12px;border-bottom:1px solid #60647a}h1{font-size:18px;margin:0 0 6px}
+    #extensions_settings{padding:10px;max-height:230px;overflow:auto}#chat{height:480px;overflow:auto;padding:12px;overflow-anchor:none}
+    .mes{padding:10px;margin-bottom:8px;background:#30364c;border-radius:8px;min-height:145px}
+    .mes_text p{margin:0 0 6px}.mes_text pre{height:95px;overflow:auto;margin:0;background:#191c2b;padding:8px;font-size:11px}
+    iframe{display:block;width:100%;height:110px;border:0;border-radius:6px}
+    .inline-drawer-toggle{display:flex;gap:8px}.inline-drawer-content{display:block}.checkbox_label{display:flex;align-items:center;gap:8px}
+    .menu_button{padding:5px 10px}.dom-window-spacer{background:none}#show_more_messages{height:25px}
+    small{font-size:12px}:root{--SmartThemeBorderColor:#6c7086;--SmartThemeBlurTintColor:#262c40}
+  </style>
+</head>
+<body>
+  <header><h1>DOM Window：前端兼容本地测试</h1><small>合成聊天；不连接真实酒馆，不使用真实聊天或密钥</small></header>
+  <div id="extensions_settings"></div><div id="chat"></div>
+  <script src="/jquery.js"></script>
+  <script type="module" src="/fixture.js"></script>
+</body></html>

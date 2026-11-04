@@ -1,12 +1,13 @@
 {
-  "display_name": "DOM Window",
+  "display_name": "DOM Window 兼容测试版",
   "loading_order": 5,
   "requires": [],
   "optional": [],
   "js": "index.js",
   "css": "style.css",
   "author": "Moyu Workshop",
-  "version": "0.4.2",
+  "homePage": "https://github.com/djskfjs/sillytavern-dom-window-compat",
+  "version": "0.4.3-compat.1",
   "auto_update": false,
-  "minimum_client_version": "1.13.0"
+  "minimum_client_version": "1.14.0"
 }
