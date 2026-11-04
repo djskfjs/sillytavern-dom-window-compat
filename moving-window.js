@@ -1,6 +1,6 @@
 /** Continuous reading window; chat data and saved message IDs are untouched. */
 export function createMovingWindow({ state, config, getRoot, getChat, mountMessage,
-  renderQueue, refreshMessages, lifecycle, onFailure }) {
+  renderQueue, refreshMessages, lifecycle, onFailure, onRangeChanged = () => {} }) {
   const references = new WeakMap();
   let fallbackHeight = 0;
   let generation = 0;
@@ -80,6 +80,7 @@ export function createMovingWindow({ state, config, getRoot, getChat, mountMessa
     if (!state.enabled || changing) return;
     measure(); layout(); restoreAnchor(anchor);
     layoutAnchor = captureAnchor();
+    onRangeChanged();
   }
   function observeRows() {
     if (!observer && typeof ResizeObserver === 'function') {
@@ -214,6 +215,7 @@ export function createMovingWindow({ state, config, getRoot, getChat, mountMessa
       const needsRefresh = [...wanted].filter(id => !elementOf(id)?.querySelector('iframe[id^="TH-message--"]'));
       refreshMessages(needsRefresh, { owns: () => true });
       layoutAnchor = captureAnchor();
+      onRangeChanged();
     } finally { changing = false; state.applying = false; transitionGeometry = null; }
   }
   async function drain() {
