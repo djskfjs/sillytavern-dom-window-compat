@@ -11,7 +11,7 @@
                 <small>进入聊天时自动开启</small>
             </label>
             <div class="dom-window-preload">
-                <label for="dom_window_preload"><small>预加载楼层</small></label>
+                <label for="dom_window_preload"><small>阅读窗口楼层</small></label>
                 <input type="number" id="dom_window_preload" min="1" max="100" step="1" value="5" inputmode="numeric">
                 <button type="button" id="dom_window_preload_save" class="menu_button">保存</button>
             </div>
@@ -22,7 +22,7 @@
                 </div>
                 <div id="dom_window_metrics" class="dom-window-status-metrics">窗口 — · 已加载 0/0 层<br>DOM 0 · 堆内存 —</div>
             </div>
-            <small class="dom-window-compat-note">0.4.3-compat.1：显示后代码块补渲染，滚动结束后串行恢复前端。请只启用一个 DOM Window 版本。不能保证阻止 iOS 回收或崩溃。</small>
+            <small class="dom-window-compat-note">0.4.3-compat.2：窗口跟随上下阅读，移出的旧前端同步回收。看旧记录时另保留最后一层。前端回收已核对酒馆助手 4.12.0：渲染深度需为 0，关闭流式渲染。升级后默认关闭；若仍重载请暂停使用。</small>
         </div>
     </div>
 </div>
