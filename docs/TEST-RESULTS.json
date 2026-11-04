@@ -1,54 +1,108 @@
 {
-  "date": "2026-11-04T07:56:48.405Z",
+  "date": "2026-11-04T13:19:59.902Z",
   "engine": "Chrome headless",
   "findings": [
     {
-      "case": "原版：复现原始消息无HTML标记时的前端漏渲染",
-      "result": "confirmed",
-      "frames": 0
-    },
-    {
-      "case": "modern API：上翻/回底/关闭恢复，数据不变",
-      "result": "passed",
-      "maxConcurrent": 1
-    },
-    {
-      "case": "legacy API：上翻/回底/关闭恢复，数据不变",
-      "result": "passed",
-      "maxConcurrent": 1
-    },
-    {
-      "case": "2601层：快速上下滚动、静止无循环",
-      "result": "passed",
-      "mounted": 14,
-      "discarded": 336,
-      "maxConcurrent": 1
-    },
-    {
-      "case": "补渲染过程中切换聊天，旧任务不污染新聊天",
-      "result": "passed",
-      "discarded": 7
-    },
-    {
-      "case": "新消息增量追加，不整窗重建",
+      "case": "模型复现助手强引用残留及目标回收",
       "result": "passed"
     },
     {
-      "case": "单层前端失败后继续处理其他楼层，解除等待遮罩",
+      "case": "隔离原版HTML标记检查（关闭助手DOM恢复监听）",
       "result": "passed"
     },
     {
-      "case": "窗口挂载异常时关闭窗口模式并恢复普通展示",
+      "case": "已发布compat.1：复现跨占位空白与后台引用残留",
+      "result": "passed",
+      "detached": 65
+    },
+    {
+      "case": "清理事件批量创建前端后，队列复用已有iframe",
       "result": "passed"
     },
     {
-      "case": "旧版开关不自动继承，重复加载不覆盖运行实例",
+      "case": "助手DOM替换监听已生效，正常窗口移动不重复替换楼层",
       "result": "passed"
     },
     {
-      "case": "停用扩展清理接口和面板，重新加载可正常开启",
+      "case": "modern API：5层上下阅读和关闭恢复",
+      "result": "passed"
+    },
+    {
+      "case": "legacy API：5层上下阅读和关闭恢复",
+      "result": "passed"
+    },
+    {
+      "case": "设置10层：10个前端全部完成",
+      "result": "passed"
+    },
+    {
+      "case": "单次跨上下巨大占位后停手：非空视口且10层恢复",
+      "result": "passed"
+    },
+    {
+      "case": "慢前端和快速反向：旧任务不滞留",
+      "result": "passed",
+      "discarded": 40
+    },
+    {
+      "case": "12000px末楼不会错误拉动历史窗口",
+      "result": "passed"
+    },
+    {
+      "case": "异步回收期间继续滑动：最终手势接管位置",
+      "result": "passed"
+    },
+    {
+      "case": "历史阅读时追加消息：区间和重叠实例保留",
+      "result": "passed"
+    },
+    {
+      "case": "相邻窗口复用重叠iframe",
+      "result": "passed"
+    },
+    {
+      "case": "120轮跨历史滚动：后台最多11个实例，无脱离DOM引用",
+      "result": "passed",
+      "rounds": 120,
+      "runtimePeak": 11,
+      "detached": 0
+    },
+    {
+      "case": "恢复时切换聊天：无旧前端污染",
+      "result": "passed"
+    },
+    {
+      "case": "底部追加：最近10层继续移动",
+      "result": "passed"
+    },
+    {
+      "case": "单个恢复失败后继续其他楼层",
+      "result": "passed"
+    },
+    {
+      "case": "挂载异常后关闭并恢复普通展示",
+      "result": "passed"
+    },
+    {
+      "case": "旧开关不自动继承，重复加载保护",
+      "result": "passed"
+    },
+    {
+      "case": "扩展卸载与重新加载",
+      "result": "passed"
+    },
+    {
+      "case": "未知助手版本拒绝启动，避免半成品回收",
+      "result": "passed"
+    },
+    {
+      "case": "同步查找旧楼层时移动完整窗口",
+      "result": "passed"
+    },
+    {
+      "case": "挂起恢复取消后仍有超时守护，不启动第二个恢复调用",
       "result": "passed"
     }
   ],
-  "limitation": "合成聊天和模拟酒馆助手；不等同于真实 iOS Safari 或真实前端长期测试"
+  "limitation": "合成聊天及模拟助手强引用模型；不是真实 iOS Safari 长期测试"
 }
