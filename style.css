@@ -5,6 +5,25 @@
   pointer-events: none;
 }
 
+.dom-window-compat-note {
+  display: block;
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.6;
+  opacity: 0.75;
+}
+
+#chat .dom-window-render-hint {
+  display: block;
+  font-size: 12px;
+  line-height: 1.6;
+  opacity: 0.75;
+}
+
+#chat .mes.dom-window-render-pending .mes_text pre {
+  visibility: hidden;
+}
+
 .dom-window-header-state {
   margin-left: 8px;
   font-size: 11px;
