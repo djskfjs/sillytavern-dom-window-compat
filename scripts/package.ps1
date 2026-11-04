@@ -12,7 +12,7 @@ $taskSourcePackage = Join-Path $taskStage 'source/dom-window-compat'
 New-Item -ItemType Directory -Force -Path $taskOutputs,$taskInstall,$taskSourcePackage | Out-Null
 $taskManifest = Get-Content -LiteralPath (Join-Path $taskSource 'manifest.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskVersion = $taskManifest.version
-$taskRuntimeFiles = @('index.js','render-queue.js','manifest.json','settings.html','style.css','LICENSE','README.md','CHANGELOG.md')
+$taskRuntimeFiles = @('index.js','render-queue.js','moving-window.js','helper-lifecycle.js','manifest.json','settings.html','style.css','LICENSE','README.md','CHANGELOG.md')
 foreach ($taskFile in $taskRuntimeFiles) {
     Copy-Item -LiteralPath (Join-Path $taskSource $taskFile) -Destination (Join-Path $taskInstall $taskFile)
 }
@@ -50,7 +50,7 @@ function Test-TaskZip([string]$ZipPath,[string]$Prefix,[string]$SourcePath,[stri
 }
 $taskChecks = @(
     Test-TaskZip $taskInstallZip 'sillytavern_dom_window' $taskSource $taskRuntimeFiles
-    Test-TaskZip $taskSourceZip 'dom-window-compat' $taskSource @('index.js','render-queue.js','LICENSE','tests/browser.mjs','tests/vendor/jquery.min.js','scripts/package.ps1')
+    Test-TaskZip $taskSourceZip 'dom-window-compat' $taskSource @('index.js','render-queue.js','moving-window.js','helper-lifecycle.js','LICENSE','tests/browser.mjs','tests/vendor/jquery.min.js','scripts/package.ps1')
 )
 $taskChecks | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $taskOutputs '打包校验.json') -Encoding UTF8
 @($taskChecks | ForEach-Object { $_.SHA256 + '  ' + $_.Name }) | Set-Content -LiteralPath (Join-Path $taskOutputs 'SHA256SUMS.txt') -Encoding UTF8

@@ -1,5 +1,5 @@
 /**
- * DOM Window 0.4.3-compat.1 — local compatibility test build
+ * DOM Window 0.4.3-compat.2 — local compatibility test build
  *
  * 只窗口化 ST 的消息 DOM，不改 chat 数据。
  * - chat 数组保持完整，AI 上下文、存档、消息 ID 不变。
@@ -12,6 +12,8 @@
  * - STDOMWindow.getMessageElement(mesid) 按需挂载某一层
  */
 import { createRenderQueue } from './render-queue.js';
+import { createMovingWindow } from './moving-window.js';
+import { createHelperLifecycle } from './helper-lifecycle.js';
 
 let disposeExtension = () => {};
 export function disable() { return disposeExtension(); }
@@ -19,15 +21,17 @@ export function disable() { return disposeExtension(); }
 (() => {
   'use strict';
 
-  const VERSION = '0.4.3-compat.1';
+  const VERSION = '0.4.3-compat.2';
   const LOG = '[DOMWindow]';
   let extensionDisposed = false;
+  let restoring = null;
+  let reenableOptions = null;
   if (window.STDOMWindow) {
     console.warn(LOG, '检测到另一个 DOM Window 实例，兼容版未重复加载。请只启用一个版本。');
     return;
   }
   const EXTENSION_BASE = new URL('.', import.meta.url).href;
-  const STORAGE_KEY = 'STDOMWindow.compat.enabled';
+  const STORAGE_KEY = 'STDOMWindow.moving.enabled';
   const TRUNCATION_KEY = 'STDOMWindow.compat.originalTruncation';
   const PRELOAD_KEY = 'STDOMWindow.compat.preload';
   const DEFAULT_PRELOAD = 5;
@@ -142,31 +146,31 @@ export function disable() { return disposeExtension(); }
       state.selfRenders.set(Number(id), Date.now() + SELF_RENDER_TTL);
       armSweep();
     },
-    beforeRefresh: () => {
-      if (!state.enabled) return null;
-      const root = getChatEl();
-      const top = root.getBoundingClientRect().top;
-      const element = [...root.querySelectorAll(':scope > .mes')]
-        .find(el => el.getBoundingClientRect().bottom > top);
-      return { element, top: element?.getBoundingClientRect().top,
-        atBottom: root.scrollHeight - root.scrollTop - root.clientHeight < 40,
-        revision: state.scrollRevision };
-    },
-    afterRefresh: (_item, anchor) => {
-      if (!state.enabled) return;
-      measureMounted();
-      updateSpacers();
-      if (!anchor || anchor.revision !== state.scrollRevision) return;
-      const root = getChatEl();
-      if (anchor.atBottom) root.scrollTop = root.scrollHeight;
-      else if (anchor.element?.isConnected && anchor.top !== undefined) {
-        root.scrollTop += anchor.element.getBoundingClientRect().top - anchor.top;
-      }
+    beforeRefresh: () => movingWindow.captureAnchor(),
+    afterRefresh: (item, anchor) => movingWindow.afterRefresh(item, anchor),
+    onStall: () => {
+      state.lastRenderError = '助手前端恢复未响应，已暂停新的恢复任务。请关闭扩展后刷新。';
+      setAutoEnabled(false);
+      const checkbox = document.getElementById('dom_window_autostart');
+      if (checkbox) checkbox.checked = false;
+      updateStatusPanel();
+      void disable();
     },
     onError: (id, error) => {
       state.lastRenderError = `第 ${id} 层前端恢复失败（${error?.name || 'Error'}），可关闭窗口模式重新进入。`;
       console.warn(LOG, '前端恢复失败', id, error?.name || 'Error');
       updateStatusPanel();
+    },
+  });
+
+  const helperLifecycle = createHelperLifecycle({ getRoot: getChatEl, getHelper: () => window.TavernHelper, getContext: getCtx });
+  const movingWindow = createMovingWindow({ state, config, getRoot: getChatEl, getChat, mountMessage, renderQueue,
+    refreshMessages: refreshMountedMessages, lifecycle: helperLifecycle,
+    onRangeChanged: () => updateStatusPanel(),
+    onFailure: error => {
+      state.lastRenderError = '窗口恢复失败，已关闭并恢复普通展示。';
+      console.warn(LOG, state.lastRenderError, error?.name);
+      void disable();
     },
   });
 
@@ -190,8 +194,8 @@ export function disable() { return disposeExtension(); }
       const root = getChatEl();
       const before = typeof beforeId === 'number' ? root.querySelector(`:scope > .mes[mesid="${beforeId}"]`) : null;
       const after = typeof afterId === 'number' ? root.querySelector(`:scope > .mes[mesid="${afterId}"]`) : null;
-      if (before && before !== el) before.before(el);
-      else if (after && after !== el) after.after(el);
+      if (before && before !== el && el.nextElementSibling !== before) before.before(el);
+      else if (after && after !== el && el.previousElementSibling !== after) after.after(el);
       const tail = root.querySelector(`:scope > .mes[mesid="${getChat().length - 1}"]`);
       if (tail && !tail.classList.contains('last_mes')) {
         root.querySelectorAll('.last_mes').forEach(node => node.classList.remove('last_mes'));
@@ -204,8 +208,8 @@ export function disable() { return disposeExtension(); }
 
   // addOneMessage 只重建正文，不会补发消息渲染事件；酒馆助手的楼层界面
   // 依赖该事件生成 iframe，所以重新挂载后要主动刷新一次。
-  function refreshMountedMessages(ids, { force = false } = {}) {
-    renderQueue.enqueue(ids, { force, owns: element => mountedByUs.has(element) });
+  function refreshMountedMessages(ids, { force = false, owns = element => mountedByUs.has(element) } = {}) {
+    renderQueue.enqueue(ids, { force, owns });
   }
 
   // 每条自刷新独立记时（不是整批共用一个定时器），过期后清掉，避免长期占用内存。
@@ -252,19 +256,8 @@ export function disable() { return disposeExtension(); }
     refreshMountedMessages(ids, { force: true });
   }
 
-  function measureMounted() {
-    const chatEl = getChatEl();
-    if (!chatEl) return;
-    for (const el of chatEl.querySelectorAll(':scope > .mes')) {
-      const id = Number(el.getAttribute('mesid'));
-      if (!Number.isFinite(id)) continue;
-      const height = el.getBoundingClientRect().height;
-      if (height > 0) state.heights.set(id, height);
-    }
-  }
+  function measureMounted() { return movingWindow.measure(); }
 
-  // 未挂载楼层用实测均值估高。写死的 defaultHeight（4800）和这张卡的实际
-  // 楼层高度差得远，估出来的占位会让滚动位置一跳一跳，落回去又触发新一轮加载。
   function estimateHeight() {
     if (!state.heights.size) return config.defaultHeight;
     let total = 0;
@@ -280,107 +273,13 @@ export function disable() { return disposeExtension(); }
     return total;
   }
 
-  function updateSpacers() {
-    if (state.topSpacer) {
-      state.topSpacer.style.height = `${sumHeights(0, state.start - 1)}px`;
-    }
-    if (state.bottomSpacer) {
-      state.bottomSpacer.style.height = `${sumHeights(state.end + 1, state.pinnedId - 1)}px`;
-    }
-  }
+  function updateSpacers() { movingWindow.layout(); }
 
-  function clearWindow() {
-    const chatEl = getChatEl();
-    if (!chatEl) return;
-    chatEl
-      .querySelectorAll(':scope > .mes, :scope > .dom-window-spacer, #show_more_messages')
-      .forEach(el => el.remove());
-    state.topSpacer = null;
-    state.bottomSpacer = null;
-  }
+  function clearWindow() { return movingWindow.clear(); }
 
-  // 窗口内容已和 chat 对齐时直接返回，避免进场时 ST 的两次渲染事件各掀一次整窗重建。
-  // 光比楼层号不够：换聊天后楼层号可能刚好一样，必须认消息对象本身。
-  // 同一份 chat 里消息对象不会换，换聊天/重载会整批换成新对象。
-  function windowMatchesChat() {
-    const chatEl = getChatEl();
-    const chat = getChat();
-    if (!state.mounted || !chatEl || !chat.length) return false;
-    if (!state.topSpacer?.isConnected || !state.bottomSpacer?.isConnected) return false;
-    if (state.pinnedId !== chat.length - 1) return false;
-    if (chat[state.pinnedId] !== state.tailRef) return false;
+  function windowMatchesChat() { return movingWindow.matches(); }
 
-    const ids = [...chatEl.querySelectorAll(':scope > .mes')]
-      .map(el => Number(el.getAttribute('mesid')))
-      .filter(Number.isFinite);
-    const expected = state.end - state.start + 2; // 窗口内 + 固定的最后一层
-    if (ids.length !== expected) return false;
-    for (let i = state.start; i <= state.end; i++) {
-      if (!ids.includes(i)) return false;
-    }
-    return ids.includes(state.pinnedId);
-  }
-
-  function apply(force = false) {
-    if (!state.enabled || state.applying) return false;
-    const ctx = getCtx();
-    const chat = ctx?.chat;
-    const chatEl = getChatEl();
-    if (!ctx || !chat?.length || !chatEl) return false;
-    if (!force && windowMatchesChat()) return false;
-
-    state.applying = true;
-    renderQueue.cancel();
-    clearSelfRenders();
-    state.lastRenderError = '';
-    try {
-      state.chatEl = chatEl;
-      state.pinnedId = chat.length - 1;
-      state.heights.clear();
-      clearWindow();
-
-      const start = Math.max(0, state.pinnedId - (config.minWindow - 1));
-      const end = state.pinnedId - 1;
-      state.start = start;
-      state.end = end;
-
-      // created=false 的是酒馆已经挂好的楼层，界面完整，不需要再刷新
-      const mountedIds = [];
-      const collect = (id) => {
-        const res = mountMessage(id);
-        if (res?.created) mountedIds.push(id);
-        return !!res;
-      };
-      for (let i = start; i <= end; i++) collect(i);
-      collect(state.pinnedId);
-      refreshMountedMessages(mountedIds);
-
-      state.topSpacer = createSpacer('top');
-      chatEl.prepend(state.topSpacer);
-
-      state.bottomSpacer = createSpacer('bottom');
-      const pinnedEl = chatEl.querySelector(`.mes[mesid="${state.pinnedId}"]`);
-      if (pinnedEl) pinnedEl.before(state.bottomSpacer);
-      else chatEl.append(state.bottomSpacer);
-
-      measureMounted();
-      updateSpacers();
-      chatEl.scrollTop = chatEl.scrollHeight;
-      state.applying = false;
-      state.mounted = true;
-      state.tailRef = chat[state.pinnedId] ?? null;
-      log('applied', { chatLength: chat.length, start, end, pinnedId: state.pinnedId });
-      return true;
-    } catch (error) {
-      console.warn(LOG, '窗口挂载失败', error?.name || 'Error');
-      state.applying = false;
-      disable();
-      window.toastr?.warning('窗口挂载失败，已关闭 DOM Window 并恢复普通展示。');
-      return false;
-    } finally {
-      state.applying = false;
-    }
-  }
+  function apply(force = false) { return movingWindow.apply(force); }
 
   function scheduleApply(delay = 120, force = false) {
     if (!state.enabled) return;
@@ -397,45 +296,8 @@ export function disable() { return disposeExtension(); }
   // 追加新楼层时只补挂尾部，不整窗重建。
   // 整窗重建会先删掉所有 .mes 再逐个 addOneMessage，画面就是「源码 → 渲染」闪一次；
   // 每来一条回复都闪一次太难看，所以窗口完好、只多了几层时走这条路。
-  function syncTail() {
-    const chatEl = getChatEl();
-    const chat = getChat();
-    if (!chatEl || !state.mounted || state.applying) return false;
-    if (!state.topSpacer?.isConnected || !state.bottomSpacer?.isConnected) return false;
+  function syncTail() { return movingWindow.syncTail(); }
 
-    const newPinned = chat.length - 1;
-    if (newPinned <= state.pinnedId) return false;
-
-    const mountedIds = [];
-    let afterId = state.pinnedId;
-    for (let id = state.pinnedId + 1; id <= newPinned; id++) {
-      const res = mountMessage(id, { afterId });
-      if (!res) {
-        // 中途失败就退回去走整窗重建，别留半截窗口
-        for (const done of mountedIds) {
-          chatEl.querySelector(`.mes[mesid="${done}"]`)?.remove();
-        }
-        return false;
-      }
-      if (res.created) mountedIds.push(id);
-      afterId = id;
-    }
-
-    state.end = newPinned - 1;
-    state.pinnedId = newPinned;
-    state.tailRef = chat[newPinned] ?? null;
-    const pinnedEl = chatEl.querySelector(`.mes[mesid="${newPinned}"]`);
-    if (!pinnedEl) return false;
-    pinnedEl.before(state.bottomSpacer);
-    refreshMountedMessages(mountedIds);
-    measureMounted();
-    updateSpacers();
-    trim();
-    return true;
-  }
-
-  // 外部真的渲染了某层（不是我们刷新的）时才动窗口。
-  // 楼层号在窗口外的渲染不需要重排，否则任何无关楼层的事件都会掀起一次整窗重建。
   function handleExternalRender(id) {
     if (!state.mounted) {
       scheduleApply(250);
@@ -455,158 +317,21 @@ export function disable() { return disposeExtension(); }
     updateSpacers();
   }
 
-  function prependBatch() {
-    const ctx = getCtx();
-    const chatEl = getChatEl();
-    if (!ctx || !chatEl) return;
-    const newStart = Math.max(0, state.start - config.batch);
-    if (newStart >= state.start) return;
 
-    const firstEl = chatEl.querySelector(`.mes[mesid="${state.start}"]`);
-    if (!firstEl) return;
-    const beforeId = state.start;
-    // 记住锚点楼层和它在视口里的位置，挂完新楼层后把它挪回原位，
-    // 这样占位估得准不准都不会让画面跳。
-    const anchorTop = firstEl.getBoundingClientRect().top;
 
-    const mountedIds = [];
-    for (let i = newStart; i < state.start; i++) {
-      const res = mountMessage(i, { beforeId });
-      if (res?.created) mountedIds.push(i);
-    }
 
-    state.start = newStart;
-    // trim() 只回收视口外太远的楼层，且受 maxWindow 约束；这里先不回收，
-    // 让锚点位移修正跑完再统一 trim，避免刚挂上就被删。
-    refreshMountedMessages(mountedIds);
-    measureMounted();
-    updateSpacers();
 
-    const anchorEl = chatEl.querySelector(`.mes[mesid="${beforeId}"]`);
-    if (anchorEl) chatEl.scrollTop += anchorEl.getBoundingClientRect().top - anchorTop;
-  }
 
-  function appendBatch() {
-    const chatEl = getChatEl();
-    if (!chatEl) return;
-    const newEnd = Math.min(state.pinnedId - 1, state.end + config.batch);
-    if (newEnd <= state.end) return;
 
-    let afterId = state.end;
-    const mountedIds = [];
-    for (let i = state.end + 1; i <= newEnd; i++) {
-      const res = mountMessage(i, { afterId });
-      if (!res) break;
-      if (res.created) mountedIds.push(i);
-      afterId = i;
-    }
 
-    state.end = newEnd;
-    refreshMountedMessages(mountedIds);
-    measureMounted();
-    updateSpacers();
-  }
 
-  // 回收视口外的楼层。
-  // 关键点：只能回收「离视口很远」的楼层。原来的判据是 0.25 个视口，
-  // 上滚时刚补上的楼层正好落在这个范围里，删掉后下一帧又补回来，
-  // 同一层反复重建，画面就在源码和渲染之间来回闪。
-  function removeEdge(side) {
-    const chatEl = getChatEl();
-    if (!chatEl) return false;
-    const id = side === 'top' ? state.start : state.end;
-    if (side === 'top' && state.start > state.end) return false;
 
-    const el = chatEl.querySelector(`:scope > .mes[mesid="${id}"]`);
-    if (!el) {
-      // 已经不在 DOM 里，只同步指针
-      if (side === 'top') state.start++;
-      else state.end--;
-      return true;
-    }
 
-    const rect = el.getBoundingClientRect();
-    const chatRect = chatEl.getBoundingClientRect();
-    const margin = chatEl.clientHeight * config.trimFactor;
-    const far = side === 'top'
-      ? rect.bottom < chatRect.top - margin
-      : rect.top > chatRect.bottom + margin;
-    if (!far) return false;
+  function onScroll() { movingWindow.onScroll(); }
 
-    state.heights.set(id, rect.height);
-    el.remove();
-    if (side === 'top') state.start++;
-    else state.end--;
-    return true;
-  }
+  function getMessageElement(mesid) { return movingWindow.getMessageElement(Number(mesid)); }
 
-  function countWindow() {
-    return state.end - state.start + 1;
-  }
-
-  function trim() {
-    let guard = 0;
-    while (countWindow() > config.maxWindow && guard++ < 40) {
-      if (!removeEdge('top') && !removeEdge('bottom')) break;
-    }
-    updateSpacers();
-  }
-
-  function onScroll() {
-    if (!state.enabled || state.applying) return;
-    state.scrollRevision++;
-    renderQueue.defer();
-    if (state.scrollRaf) return;
-    state.scrollRaf = requestAnimationFrame(() => {
-      state.scrollRaf = 0;
-      const chatEl = getChatEl();
-      if (!chatEl) return;
-      const viewport = chatEl.clientHeight;
-      const topHeight = state.topSpacer?.offsetHeight || 0;
-      const bottomHeight = state.bottomSpacer?.offsetHeight || 0;
-      const nearTop = chatEl.scrollTop < topHeight + viewport * config.nearViewportFactor;
-      const nearBottom =
-        chatEl.scrollTop + viewport >
-        chatEl.scrollHeight - bottomHeight - viewport * config.nearViewportFactor;
-
-      if (nearTop && state.start > 0) prependBatch();
-      else if (nearBottom && state.end < state.pinnedId - 1) appendBatch();
-      trim();
-    });
-  }
-
-  function getMessageElement(mesid) {
-    const id = Number(mesid);
-    const chatEl = getChatEl();
-    if (!chatEl || !Number.isFinite(id)) return null;
-    const existing = chatEl.querySelector(`.mes[mesid="${id}"]`);
-    if (existing) return existing;
-
-    const chat = getChat();
-    if (id < 0 || id >= chat.length) return null;
-
-    if (id < state.start) {
-      const res = mountMessage(id, { beforeId: state.start });
-      if (res?.created) refreshMountedMessages([id]);
-      state.start = Math.min(state.start, id);
-    } else if (id > state.end && id !== state.pinnedId) {
-      const res = mountMessage(id, { afterId: state.end });
-      if (res?.created) refreshMountedMessages([id]);
-      state.end = Math.max(state.end, id);
-    }
-    measureMounted();
-    updateSpacers();
-    return chatEl.querySelector(`.mes[mesid="${id}"]`);
-  }
-
-  function checkWindowIntegrity() {
-    if (!state.enabled) return;
-    const chatEl = getChatEl();
-    if (!chatEl) return;
-    if (chatEl.querySelectorAll(':scope > .mes').length > config.maxWindow + 5) {
-      scheduleApply(100);
-    }
-  }
+  function checkWindowIntegrity() { movingWindow.integrity(); }
 
   function bindEvents() {
     const ctx = getCtx();
@@ -674,6 +399,8 @@ export function disable() { return disposeExtension(); }
 
   function enable(options = {}) {
     if (extensionDisposed) return false;
+    if (renderQueue.snapshot().stalled) { window.toastr?.warning('前端恢复未响应，请刷新酒馆后再试。'); return false; }
+    if (restoring) { reenableOptions = options; return true; }
     if (state.enabled) return true;
     const ctx = getCtx();
     if (!ctx?.chat) {
@@ -682,7 +409,16 @@ export function disable() { return disposeExtension(); }
       return false;
     }
 
+    const lifecycleCheck = helperLifecycle.inspect();
+    if (!lifecycleCheck.ok) {
+      state.lastRenderError = lifecycleCheck.reason;
+      window.toastr?.warning(lifecycleCheck.reason);
+      updateStatusPanel();
+      return false;
+    }
     Object.assign(config, options || {});
+    config.minWindow = Math.max(1, Math.min(MAX_PRELOAD, Math.trunc(Number(config.minWindow) || DEFAULT_PRELOAD)));
+    config.maxWindow = config.minWindow;
     state.enabled = true;
     state.pinnedId = ctx.chat.length - 1;
     clearSelfRenders();
@@ -701,6 +437,7 @@ export function disable() { return disposeExtension(); }
 
     bindEvents();
     apply();
+    updateStatusPanel();
     return true;
   }
 
@@ -709,7 +446,7 @@ export function disable() { return disposeExtension(); }
     state.enableTimer = 0;
     clearTimeout(state.autoStartTimer);
     state.autoStartTimer = 0;
-    if (!state.enabled) return;
+    if (!state.enabled) { reenableOptions = null; return restoring || Promise.resolve(); }
     state.enabled = false;
     renderQueue.cancel();
     clearSelfRenders();
@@ -719,25 +456,33 @@ export function disable() { return disposeExtension(); }
     if (state.scrollRaf) cancelAnimationFrame(state.scrollRaf);
     state.scrollRaf = 0;
     unbindEvents();
-    clearWindow();
-    state.mounted = false;
-    state.heights.clear();
-
-    const ctx = getCtx();
-    let restore = state.originalTruncation;
-    if (restore == null) {
-      const stored = localStorage.getItem(TRUNCATION_KEY);
-      if (stored != null && Number.isFinite(Number(stored))) restore = Number(stored);
-    }
-    if (restore != null && ctx?.powerUserSettings) {
-      ctx.powerUserSettings.chat_truncation = restore;
-      ctx.saveSettingsDebounced?.();
-      state.originalTruncation = null;
-      localStorage.removeItem(TRUNCATION_KEY);
-    }
-    const printed = safe(() => ctx?.printMessages?.(), 'restore rendering');
-    if (printed?.then) printed.then(refreshAllMounted);
-    else refreshAllMounted();
+    restoring = (async () => {
+      try { await clearWindow(); } catch (error) { console.warn(LOG, 'release failed', error?.name); }
+      state.mounted = false; state.heights.clear();
+      const ctx = getCtx();
+      let restore = state.originalTruncation;
+      if (restore == null) {
+        const stored = localStorage.getItem(TRUNCATION_KEY);
+        if (stored != null && Number.isFinite(Number(stored))) restore = Number(stored);
+      }
+      if (restore != null && ctx?.powerUserSettings) {
+        ctx.powerUserSettings.chat_truncation = restore;
+        ctx.saveSettingsDebounced?.(); state.originalTruncation = null;
+        localStorage.removeItem(TRUNCATION_KEY);
+      }
+      const printed = safe(() => ctx?.printMessages?.(), 'restore rendering');
+      if (printed?.then) await printed;
+      refreshAllMounted();
+      try { await renderQueue.whenIdle(); } catch (error) {
+        state.lastRenderError = '前端恢复未响应，窗口已关闭，请刷新酒馆恢复展示。';
+        console.warn(LOG, state.lastRenderError, error?.name);
+      }
+    })().finally(() => {
+      restoring = null;
+      const options = reenableOptions; reenableOptions = null;
+      if (options && !extensionDisposed) enable(options);
+    });
+    return restoring;
   }
 
   function audit() {
@@ -747,6 +492,7 @@ export function disable() { return disposeExtension(); }
       version: VERSION,
       enabled: state.enabled,
       mounted: state.mounted,
+      applying: state.applying || !!restoring,
       chatLength: chat.length,
       start: state.start,
       end: state.end,
@@ -758,6 +504,8 @@ export function disable() { return disposeExtension(); }
       domNodes: document.querySelectorAll('*').length,
       lastMes: chatEl?.querySelector('.last_mes')?.getAttribute('mesid') ?? null,
       renderQueue: renderQueue.snapshot(),
+      windowSize: movingWindow.size(),
+      helperLifecycle: helperLifecycle.inspect(),
     };
   }
 
@@ -785,7 +533,7 @@ export function disable() { return disposeExtension(); }
 
   function getAutoOptions() {
     const size = getPreloadSize();
-    return { minWindow: size, maxWindow: Math.max(9, size), batch: 2, manageTruncation: true };
+    return { minWindow: size, maxWindow: size, batch: 2, manageTruncation: true };
   }
 
   function isAutoEnabled() {
@@ -828,8 +576,8 @@ export function disable() { return disposeExtension(); }
       checkbox.addEventListener('change', () => {
         const on = checkbox.checked;
         setAutoEnabled(on);
-        if (on) enable(getAutoOptions());
-        else disable();
+        if (on && !enable(getAutoOptions())) { checkbox.checked = false; setAutoEnabled(false); }
+        else if (!on) void disable();
       });
 
       const preloadInput = document.getElementById('dom_window_preload');
@@ -909,16 +657,13 @@ export function disable() { return disposeExtension(); }
   }, 1000);
   updateStatusPanel();
 
-  disposeExtension = () => {
+  disposeExtension = async () => {
     extensionDisposed = true;
-    disable();
     clearInterval(statusInterval);
     document.getElementById('dom_window_settings')?.remove();
-    // Restore renders are allowed to finish before the queue is disposed.
-    return renderQueue.whenIdle().then(() => {
-      renderQueue.dispose();
-      if (window.STDOMWindow === api) delete window.STDOMWindow;
-    });
+    await disable();
+    renderQueue.dispose();
+    if (window.STDOMWindow === api) delete window.STDOMWindow;
   };
 
   if (location.search.includes('domwindow=1') || isAutoEnabled()) {
