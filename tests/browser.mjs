@@ -8,6 +8,7 @@ import { existsSync } from 'node:fs';
 const { chromium } = createRequire(import.meta.url)('playwright');
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const baseline = process.env.DOM_WINDOW_BASELINE || path.resolve(root, '../upstream');
+const previousSource = process.env.DOM_WINDOW_PREVIOUS || path.resolve(root, '../dom-window-compat');
 const output = process.env.DOM_WINDOW_TEST_OUTPUT || path.resolve(root, '../test-results-moving');
 await mkdir(output, { recursive: true }); await mkdir(path.join(output, 'temp'), { recursive: true });
 const findings = []; let browser;
@@ -22,7 +23,7 @@ const server = createServer(async (req, res) => {
       if (path.basename(name) !== name || !/\.(js|css|html)$/.test(name)) { res.writeHead(404).end(); return; }
       const original = url.searchParams.get('variant') === 'baseline' || req.headers.referer?.includes('variant=baseline');
       const previous = url.searchParams.get('variant') === 'previous' || req.headers.referer?.includes('variant=previous');
-      target = path.join(original ? baseline : previous ? path.resolve(root, '../dom-window-compat') : root, name);
+      target = path.join(original ? baseline : previous ? previousSource : root, name);
     } else { res.writeHead(404).end(); return; }
     const types = { '.js': 'text/javascript', '.html': 'text/html', '.css': 'text/css' };
     res.setHeader('Content-Type', (types[path.extname(target)] || 'application/octet-stream') + '; charset=utf-8');
@@ -95,7 +96,7 @@ try {
     const { page, errors } = await open('variant=baseline&count=337&noRecovery=1'); await enable(page); await page.waitForTimeout(600);
     assert.equal((await state(page)).frames.length, 0); await pass('隔离原版HTML标记检查（关闭助手DOM恢复监听）', page, errors);
   }
-  if (existsSync(path.resolve(root, '../dom-window-compat/index.js'))) {
+  if (existsSync(path.join(previousSource, 'index.js')) && previousSource !== root) {
     const { page, errors } = await open('variant=previous&count=2601&preload=10'); await enable(page); await page.waitForTimeout(700);
     await page.evaluate(() => window.fixture.jumpTopSpacer(0.4)); await page.waitForTimeout(500); const data = await state(page);
     assert.equal(data.visibleIds.length, 0, 'previous published build reproduces an empty viewport after a single jump');

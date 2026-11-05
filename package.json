@@ -1,8 +1,8 @@
 {
   "name": "dom-window-compat-test",
-  "version": "0.4.3-compat.1",
+  "version": "0.4.3-compat.3",
   "private": true,
   "type": "module",
-  "scripts": { "test": "node tests/browser.mjs" },
+  "scripts": { "test": "node tests/browser.mjs && node tests/scroll-regressions.mjs", "test:scroll": "node tests/scroll-regressions.mjs" },
   "devDependencies": { "playwright": "^1.55.0" }
 }

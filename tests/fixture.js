@@ -4,6 +4,7 @@ const legacy = params.get('api') === 'legacy';
 const count = Number(params.get('count') || 337);
 const tailHeight = Number(params.get('tailHeight') || 110);
 const releaseDelay = Number(params.get('releaseDelay') || 0);
+const frameHeight = Number(params.get('frameHeight') || 110);
 if (params.has('seed')) localStorage.setItem('STDOMWindow', '1');
 if (params.has('preload')) localStorage.setItem('STDOMWindow.compat.preload', params.get('preload'));
 let token = 1, initializing = true, active = 0;
@@ -35,6 +36,7 @@ function format(id, node) {
   const p = document.createElement('p'); p.textContent = `测试楼层 ${token}:${id}`;
   const pre = document.createElement('pre'), code = document.createElement('code');
   code.className = 'language-html'; code.textContent = widget(id); pre.append(code); node.append(p, pre);
+  if (params.has('sourceHeight')) pre.style.height = `${Number(params.get('sourceHeight'))}px`;
 }
 function destroyRuntime(id) {
   const runtime = runtimes.get(Number(id)); if (!runtime) return;
@@ -49,6 +51,7 @@ function addRuntime(element) {
   frame.id = `TH-message--${id}--0`;
   frame.title = `前端 ${token}:${id}`; frame.dataset.id = id; frame.dataset.token = token;
   frame.dataset.instance = String(++window.stats.started); frame.srcdoc = widget(id);
+  frame.style.height = `${frameHeight}px`;
   if (id === ctx.chat.length - 1) frame.style.height = `${tailHeight}px`;
   text.append(frame); text.querySelector('pre').style.display = 'none';
   runtimes.set(id, { id, token, element, frame });
@@ -72,6 +75,7 @@ ctx.addOneMessage = (message, opts = {}) => {
   const id = opts.forceId ?? ctx.chat.indexOf(message);
   if (window.failMountId === id) { window.failMountId = null; throw Error('fixture mount failure'); }
   const el = document.createElement('div'); el.className = 'mes'; el.setAttribute('mesid', id);
+  if (params.has('flex')) el.style.flexShrink = '0';
   const text = document.createElement('div'); text.className = 'mes_text'; el.append(text); format(id, text);
   const root = document.querySelector('#chat');
   const before = typeof opts.insertBefore === 'number' && (!legacy || opts.insertBefore) ? root.querySelector(`.mes[mesid="${opts.insertBefore}"]`) : null;
@@ -168,6 +172,8 @@ window.fixture = {
   },
 };
 ctx.chat = makeMessages(count); ctx.printMessages(); auditRuntimes();
+if (params.has('nativeAnchor')) document.querySelector('#chat').style.overflowAnchor = 'auto';
+if (params.has('flex')) Object.assign(document.querySelector('#chat').style, { display: 'flex', flexDirection: 'column' });
 initializing = false; window.stats.calls = []; window.stats.maxConcurrent = 0;
 window.fixture.entryModule = await import('/extension/index.js?variant=' + params.get('variant'));
 window.fixtureReady = true;

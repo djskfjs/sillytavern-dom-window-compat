@@ -8,7 +8,7 @@ export function hasFrontendCandidate(message, element) {
 
 export function createRenderQueue({ getRoot, getChat, refresh, markSelfRender,
   beforeRefresh = () => null, afterRefresh = () => {}, onError = () => {},
-  onStall = () => {}, settleMs = 160, stallMs = 15000 }) {
+  onStall = () => {}, settleMs = 160, maxWaitMs = 240, stallMs = 15000 }) {
   const pending = new Map();
   let generation = 0;
   let active = null;
@@ -120,13 +120,16 @@ export function createRenderQueue({ getRoot, getChat, refresh, markSelfRender,
       clearTimeout(timer); timer = 0; notifyIdle(); return;
     }
     clearTimeout(timer);
-    timer = setTimeout(pump, Math.max(delay, scrollSettledAt - performance.now(), 0));
+    const now = performance.now();
+    const deadline = Math.min(...[...pending.values()].map(item => item.queuedAt + maxWaitMs));
+    timer = setTimeout(pump, Math.max(0, Math.min(Math.max(delay, scrollSettledAt - now), deadline - now)));
   }
 
   async function pump() {
     timer = 0;
     if (disposed || active || stalled) return;
-    if (performance.now() < scrollSettledAt) { schedule(); return; }
+    const now = performance.now();
+    if (now < scrollSettledAt && ![...pending.values()].some(item => now >= item.queuedAt + maxWaitMs)) { schedule(); return; }
     let next;
     let best = Infinity;
     for (const [id, item] of pending) {
@@ -134,7 +137,9 @@ export function createRenderQueue({ getRoot, getChat, refresh, markSelfRender,
       // Helper's normal range audit may have rendered other queued floors.
       // Reuse those runtimes instead of replacing their iframe a second time.
       if (!item.force && item.element.querySelector('iframe[id^="TH-message--"]')) {
-        pending.delete(id); clearWaiting(item); completed++; continue;
+        const anchor = beforeRefresh(item);
+        pending.delete(id); clearWaiting(item); completed++;
+        afterRefresh(item, anchor); continue;
       }
       const value = priority(item);
       if (value < best) { next = item; best = value; }
@@ -142,19 +147,23 @@ export function createRenderQueue({ getRoot, getChat, refresh, markSelfRender,
     if (!next) { notifyIdle(); return; }
     pending.delete(next.id);
     active = next;
+    let anchor;
     try {
-      const anchor = beforeRefresh(next);
+      anchor = beforeRefresh(next);
       markSelfRender(next.id);
       armStallTimer(next);
       await refresh(next.id, next.element);
       if (valid(next)) {
         completed++;
         markSelfRender(next.id);
+        clearWaiting(next);
         afterRefresh(next, anchor);
       } else discarded++;
     } catch (error) {
       if (valid(next)) {
         errors++;
+        clearWaiting(next);
+        afterRefresh(next, anchor);
         try { onError(next.id, error); } catch (callbackError) {
           console.warn('[DOMWindow]', 'error callback failed', callbackError);
         }
@@ -182,7 +191,8 @@ export function createRenderQueue({ getRoot, getChat, refresh, markSelfRender,
         if (active?.id === id && active.element === element && valid(active)) continue;
         const previous = pending.get(id);
         if (previous) clearWaiting(previous);
-        const item = { id, element, message, text: message.mes, swipe: message.swipe_id, generation, force };
+        const item = { id, element, message, text: message.mes, swipe: message.swipe_id, generation, force,
+          queuedAt: previous?.element === element ? previous.queuedAt : performance.now() };
         pending.set(id, item);
         markWaiting(item);
       }

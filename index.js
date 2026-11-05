@@ -1,5 +1,5 @@
 /**
- * DOM Window 0.4.3-compat.2 — local compatibility test build
+ * DOM Window 0.4.3-compat.3 — local compatibility test build
  *
  * 只窗口化 ST 的消息 DOM，不改 chat 数据。
  * - chat 数组保持完整，AI 上下文、存档、消息 ID 不变。
@@ -21,7 +21,7 @@ export function disable() { return disposeExtension(); }
 (() => {
   'use strict';
 
-  const VERSION = '0.4.3-compat.2';
+  const VERSION = '0.4.3-compat.3';
   const LOG = '[DOMWindow]';
   let extensionDisposed = false;
   let restoring = null;
@@ -31,7 +31,7 @@ export function disable() { return disposeExtension(); }
     return;
   }
   const EXTENSION_BASE = new URL('.', import.meta.url).href;
-  const STORAGE_KEY = 'STDOMWindow.moving.enabled';
+  const STORAGE_KEY = 'STDOMWindow.scrollfix.enabled';
   const TRUNCATION_KEY = 'STDOMWindow.compat.originalTruncation';
   const PRELOAD_KEY = 'STDOMWindow.compat.preload';
   const DEFAULT_PRELOAD = 5;

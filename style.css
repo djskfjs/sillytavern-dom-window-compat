@@ -21,7 +21,7 @@
 }
 
 #chat .mes.dom-window-render-pending .mes_text pre {
-  visibility: hidden;
+  display: none;
 }
 
 .dom-window-header-state {
