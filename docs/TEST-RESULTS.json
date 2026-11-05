@@ -1,6 +1,9 @@
 {
-  "date": "2026-11-04T13:19:59.902Z",
+  "date": "2026-11-05",
+  "version": "0.4.3-compat.3",
   "engine": "Chrome headless",
+  "passed": 24,
+  "scrollPassed": 6,
   "findings": [
     {
       "case": "模型复现助手强引用残留及目标回收",
@@ -13,7 +16,7 @@
     {
       "case": "已发布compat.1：复现跨占位空白与后台引用残留",
       "result": "passed",
-      "detached": 65
+      "detached": 79
     },
     {
       "case": "清理事件批量创建前端后，队列复用已有iframe",
@@ -104,5 +107,85 @@
       "result": "passed"
     }
   ],
-  "limitation": "合成聊天及模拟助手强引用模型；不是真实 iOS Safari 长期测试"
+  "scrolling": [
+    {
+      "name": "No scroll write for a resize below the reader",
+      "passed": true,
+      "detail": []
+    },
+    {
+      "name": "Continuous scrolling cannot starve visible frontend recovery",
+      "passed": true,
+      "detail": 245.20000000018626
+    },
+    {
+      "name": "Slow helper cleanup keeps the overlapping row stationary",
+      "passed": true,
+      "detail": {
+        "maxShift": 0,
+        "samples": 150
+      }
+    },
+    {
+      "name": "Native scroll anchoring is disabled only while the window is enabled",
+      "passed": true,
+      "detail": {
+        "active": "none",
+        "restored": "auto"
+      }
+    },
+    {
+      "name": "Long hidden source does not become a giant blank row",
+      "passed": true,
+      "detail": {
+        "maxPendingHeight": 906.5
+      }
+    },
+    {
+      "name": "Small upward wheel gestures keep making progress",
+      "passed": true,
+      "detail": {
+        "before": 196.6918604651163,
+        "after": 191.53065539112052,
+        "backtracks": 0
+      }
+    }
+  ],
+  "compat2Comparison": [
+    {
+      "name": "No scroll write for a resize below the reader",
+      "passed": false,
+      "error": "[{\"before\":147523,\"value\":147523}]\n\n1 !== 0\n"
+    },
+    {
+      "name": "Continuous scrolling cannot starve visible frontend recovery",
+      "passed": false,
+      "error": "recovery start: null"
+    },
+    {
+      "name": "Slow helper cleanup keeps the overlapping row stationary",
+      "passed": false,
+      "error": "{\"maxShift\":1908,\"samples\":149}"
+    },
+    {
+      "name": "Native scroll anchoring is disabled only while the window is enabled",
+      "passed": false,
+      "error": "Expected values to be strictly equal:\n\n'auto' !== 'none'\n"
+    },
+    {
+      "name": "Long hidden source does not become a giant blank row",
+      "passed": false,
+      "error": "[18065.1875,18065.1875,18065.1875,18065.1875,18065.1875,18065.1875,18065.1875,18065.1875,18065.1875,18065.1875]"
+    },
+    {
+      "name": "Small upward wheel gestures keep making progress",
+      "passed": true,
+      "detail": {
+        "before": 185.39429175475686,
+        "after": 180.34566596194503,
+        "backtracks": 0
+      }
+    }
+  ],
+  "limitation": "桌面 Chrome、390px 视口、合成聊天与模拟助手；未执行 iPhone Chrome 真机验收。"
 }
