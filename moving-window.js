@@ -318,6 +318,13 @@ export function createMovingWindow({ state, config, getRoot, getChat, mountMessa
       : { start: state.start, end: state.end }, anchor);
     return true;
   }
+  function resize() {
+    if (!state.enabled || !state.mounted || !getChat().length) return false;
+    const position = changing ? positionDuringTransition() : readPosition();
+    const atBottom = root().scrollHeight - root().scrollTop - root().clientHeight < 40;
+    requestRange(desiredRange(position?.id ?? state.end, atBottom), { ...(position || captureAnchor()), atBottom });
+    return true;
+  }
   function onScroll() {
     if (!state.enabled) return;
     if (correction !== null && Math.abs(root().scrollTop - correction) < 1) { correction = null; return; }
@@ -396,7 +403,7 @@ export function createMovingWindow({ state, config, getRoot, getChat, mountMessa
     }
     return null;
   }
-  return { apply, syncTail, onScroll, getMessageElement, clear, matches, measure, layout,
+  return { apply, syncTail, resize, onScroll, getMessageElement, clear, matches, measure, layout,
     captureAnchor, afterRefresh, size,
     integrity: () => { if (!changing && !matches()) requestRange({ start: state.start, end: state.end }, captureAnchor()); } };
 }

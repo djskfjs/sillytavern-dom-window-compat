@@ -1,5 +1,5 @@
 /**
- * DOM Window 0.4.3-compat.3 — local compatibility test build
+ * DOM Window 0.4.3-compat.4 — compatibility test build
  *
  * 只窗口化 ST 的消息 DOM，不改 chat 数据。
  * - chat 数组保持完整，AI 上下文、存档、消息 ID 不变。
@@ -14,6 +14,7 @@
 import { createRenderQueue } from './render-queue.js';
 import { createMovingWindow } from './moving-window.js';
 import { createHelperLifecycle } from './helper-lifecycle.js';
+import { createHelperSetup } from './helper-setup.js';
 
 let disposeExtension = () => {};
 export function disable() { return disposeExtension(); }
@@ -21,11 +22,14 @@ export function disable() { return disposeExtension(); }
 (() => {
   'use strict';
 
-  const VERSION = '0.4.3-compat.3';
+  const VERSION = '0.4.3-compat.4';
   const LOG = '[DOMWindow]';
   let extensionDisposed = false;
   let restoring = null;
   let reenableOptions = null;
+  let preparing = null;
+  let requestedEnable = false;
+  let recoveryAttempted = false;
   if (window.STDOMWindow) {
     console.warn(LOG, '检测到另一个 DOM Window 实例，兼容版未重复加载。请只启用一个版本。');
     return;
@@ -164,6 +168,11 @@ export function disable() { return disposeExtension(); }
   });
 
   const helperLifecycle = createHelperLifecycle({ getRoot: getChatEl, getHelper: () => window.TavernHelper, getContext: getCtx });
+  const deviceKey = 'STDOMWindow.compat.device';
+  const settingsOwner = localStorage.getItem(deviceKey) || globalThis.crypto?.randomUUID?.() ||
+    `dw-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  localStorage.setItem(deviceKey, settingsOwner);
+  const helperSetup = createHelperSetup({ getHelper: () => window.TavernHelper, getContext: getCtx, owner: settingsOwner });
   const movingWindow = createMovingWindow({ state, config, getRoot: getChatEl, getChat, mountMessage, renderQueue,
     refreshMessages: refreshMountedMessages, lifecycle: helperLifecycle,
     onRangeChanged: () => updateStatusPanel(),
@@ -397,8 +406,10 @@ export function disable() { return disposeExtension(); }
     safe(() => getChatEl()?.removeEventListener('scroll', onScroll), 'unbind-scroll');
   }
 
-  function enable(options = {}) {
+  async function enable(options = {}) {
+    requestedEnable = true;
     if (extensionDisposed) return false;
+    if (preparing) return preparing;
     if (renderQueue.snapshot().stalled) { window.toastr?.warning('前端恢复未响应，请刷新酒馆后再试。'); return false; }
     if (restoring) { reenableOptions = options; return true; }
     if (state.enabled) return true;
@@ -406,11 +417,30 @@ export function disable() { return disposeExtension(); }
     if (!ctx?.chat) {
       clearTimeout(state.enableTimer);
       state.enableTimer = setTimeout(() => { state.enableTimer = 0; enable(options); }, 200);
-      return false;
+      return true;
     }
 
     const lifecycleCheck = helperLifecycle.inspect();
     if (!lifecycleCheck.ok) {
+      if (lifecycleCheck.canConfigure) {
+        preparing = (async () => {
+          state.lastRenderError = '正在自动适配助手设置，保存成功后会刷新一次…';
+          updateStatusPanel();
+          try {
+            await helperSetup.configure();
+            if (!requestedEnable) await helperSetup.restore();
+            setAutoEnabled(requestedEnable);
+            location.reload();
+            return requestedEnable;
+          } catch (error) {
+            state.lastRenderError = error.message;
+            window.toastr?.warning(error.message);
+            setAutoEnabled(false);
+            return false;
+          } finally { preparing = null; updateStatusPanel(); }
+        })();
+        return preparing;
+      }
       state.lastRenderError = lifecycleCheck.reason;
       window.toastr?.warning(lifecycleCheck.reason);
       updateStatusPanel();
@@ -420,6 +450,7 @@ export function disable() { return disposeExtension(); }
     config.minWindow = Math.max(1, Math.min(MAX_PRELOAD, Math.trunc(Number(config.minWindow) || DEFAULT_PRELOAD)));
     config.maxWindow = config.minWindow;
     state.enabled = true;
+    state.lastRenderError = '';
     state.pinnedId = ctx.chat.length - 1;
     clearSelfRenders();
 
@@ -442,6 +473,8 @@ export function disable() { return disposeExtension(); }
   }
 
   function disable() {
+    requestedEnable = false;
+    if (preparing) return preparing.then(() => undefined);
     clearTimeout(state.enableTimer);
     state.enableTimer = 0;
     clearTimeout(state.autoStartTimer);
@@ -470,6 +503,17 @@ export function disable() { return disposeExtension(); }
         ctx.saveSettingsDebounced?.(); state.originalTruncation = null;
         localStorage.removeItem(TRUNCATION_KEY);
       }
+      if (helperSetup.hasBackup()) {
+        try {
+          const changed = await helperSetup.restore();
+          setAutoEnabled(false);
+          if (changed) { location.reload(); return; }
+        } catch (error) {
+          state.lastRenderError = error.message;
+          recoveryAttempted = true;
+          window.toastr?.warning(error.message);
+        }
+      }
       const printed = safe(() => ctx?.printMessages?.(), 'restore rendering');
       if (printed?.then) await printed;
       refreshAllMounted();
@@ -492,7 +536,7 @@ export function disable() { return disposeExtension(); }
       version: VERSION,
       enabled: state.enabled,
       mounted: state.mounted,
-      applying: state.applying || !!restoring,
+      applying: state.applying || !!restoring || !!preparing,
       chatLength: chat.length,
       start: state.start,
       end: state.end,
@@ -544,20 +588,6 @@ export function disable() { return disposeExtension(); }
     localStorage.setItem(STORAGE_KEY, on ? '1' : '0');
   }
 
-  async function confirmReload() {
-    try {
-      const { callGenericPopup, POPUP_TYPE } = await import('/scripts/popup.js');
-      const result = await callGenericPopup('保存后刷新生效', POPUP_TYPE.CONFIRM, '', {
-        okButton: '确认',
-        cancelButton: '取消',
-      });
-      return !!result;
-    } catch (err) {
-      console.warn(LOG, 'popup failed', err);
-      return window.confirm('保存后刷新生效');
-    }
-  }
-
   async function initSettingsPanel() {
     if (extensionDisposed || document.getElementById('dom_window_settings')) return;
     const container = document.getElementById('extensions_settings');
@@ -573,29 +603,31 @@ export function disable() { return disposeExtension(); }
       const checkbox = document.getElementById('dom_window_autostart');
       if (!checkbox) return;
       checkbox.checked = isAutoEnabled();
-      checkbox.addEventListener('change', () => {
+      checkbox.addEventListener('change', async () => {
         const on = checkbox.checked;
+        checkbox.disabled = true;
         setAutoEnabled(on);
-        if (on && !enable(getAutoOptions())) { checkbox.checked = false; setAutoEnabled(false); }
-        else if (!on) void disable();
+        try {
+          if (on && !await enable(getAutoOptions())) { checkbox.checked = false; setAutoEnabled(false); }
+          else if (!on) await disable();
+        } finally { checkbox.disabled = false; updateStatusPanel(); }
       });
 
       const preloadInput = document.getElementById('dom_window_preload');
       const saveButton = document.getElementById('dom_window_preload_save');
       if (preloadInput) preloadInput.value = String(getPreloadSize());
       if (saveButton && preloadInput) {
-        saveButton.addEventListener('click', async () => {
+        saveButton.addEventListener('click', () => {
           const raw = Number(preloadInput.value);
           const size = Number.isFinite(raw) && raw >= 1
             ? Math.min(MAX_PRELOAD, Math.trunc(raw))
             : DEFAULT_PRELOAD;
           preloadInput.value = String(size);
           localStorage.setItem(PRELOAD_KEY, String(size));
-          if (await confirmReload()) {
-            location.reload();
-          } else {
-            window.toastr?.info('已保存，刷新后生效');
-          }
+          config.minWindow = size; config.maxWindow = size;
+          if (state.enabled) movingWindow.resize();
+          window.toastr?.info(state.enabled ? `阅读窗口已调整为 ${size} 层` : '已保存，开启窗口时直接生效');
+          updateStatusPanel();
         });
       }
     } catch (err) {
@@ -637,7 +669,13 @@ export function disable() { return disposeExtension(); }
     const memory = performance.memory?.usedJSHeapSize;
     const queue = renderQueue.snapshot();
     const nodes = document.getElementsByTagName('*').length;
-    const stateText = !enabled ? '已关闭' : active ? '已开启' : '等待挂载';
+    const stateText = preparing ? '正在自动适配' : !enabled ? '已关闭' : active ? '已开启' : '等待挂载';
+    const compatibility = document.getElementById('dom_window_compatibility');
+    if (compatibility) {
+      const check = helperLifecycle.inspect();
+      compatibility.textContent = !check.ok ? check.reason : helperSetup.hasBackup()
+        ? '助手已自动适配；关闭窗口后会还原原设置并刷新。' : '开启即可使用，无需另改助手设置。';
+    }
 
     document.getElementById('dom_window_timer').textContent =
       `运行 ${formatDuration(performance.now() - statusStartedAt)}`;
@@ -654,6 +692,15 @@ export function disable() { return disposeExtension(); }
 
   const statusInterval = setInterval(() => {
     if (!document.hidden) updateStatusPanel();
+    // Recover this browser's interrupted shutdown using its account-scoped
+    // backup. Another browser opening the account must not undo adaptation.
+    if (!state.enabled && !isAutoEnabled() && !preparing && !restoring && !recoveryAttempted &&
+      helperSetup.hasBackup() && window.TavernHelper?.builtin?.saveSettings && !window.TavernHelper.builtin.duringGenerating?.()) {
+      recoveryAttempted = true;
+      preparing = helperSetup.restore().then(changed => { if (changed) location.reload(); })
+        .catch(error => { state.lastRenderError = error.message; })
+        .finally(() => { preparing = null; updateStatusPanel(); });
+    }
   }, 1000);
   updateStatusPanel();
 
@@ -670,7 +717,9 @@ export function disable() { return disposeExtension(); }
     state.autoStartTimer = setTimeout(() => {
       state.autoStartTimer = 0;
       if (location.search.includes('domwindow=1') || isAutoEnabled()) {
-        enable(getAutoOptions());
+        void enable(getAutoOptions()).then(ok => {
+          if (!ok) { setAutoEnabled(false); const checkbox = document.getElementById('dom_window_autostart'); if (checkbox) checkbox.checked = false; }
+        });
       }
     }, 1200);
   }
