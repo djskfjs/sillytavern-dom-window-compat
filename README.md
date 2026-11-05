@@ -1,8 +1,10 @@
-# DOM Window 兼容测试版 0.4.3-compat.2
+# DOM Window 兼容测试版 0.4.3-compat.3
 
 基于 [Sntolo/sillytavern_dom_window](https://github.com/Sntolo/sillytavern_dom_window) 0.4.2 的独立修改版，保留原版权与许可证。原版基线为 `deb062cbfb729198c8c70e99cfbfa43fa96f84ee`。
 
 设置 **10 层**后，上下阅读时恢复当前连续的 10 层。滑入较远的历史位置会直接移动窗口，避免停在大片空白占位中。重叠楼层继续复用；移出的楼层会释放酒馆助手对应前端资源。
+
+compat.3 针对 iPhone Chrome 上报的上滑被拉回、黑屏和闪烁：回收期间保留原楼层高度，避免异步等待时整段内容塌陷；跳过无变化的滚动位置赋值；关闭与扩展重复工作的浏览器自动定位；持续滑动时也会开始恢复前端。正在恢复的源码不再撑出巨大的空白块。电脑复现已通过，尚未完成 iPhone 真机验收。
 
 在底部，最后一层包含在这 10 层内；阅读旧记录时，另保留最后一层供酒馆生成使用，所以最多是 **10 层阅读窗口 + 1 层末楼**。一层可能包含多个前端，楼层数不等于 iframe 数或内存上限。
 
@@ -25,7 +27,7 @@ https://github.com/djskfjs/sillytavern-dom-window-compat
 
 1. 等回复结束、聊天保存后，关闭当前 DOM Window 的“进入聊天时自动开启”。
 2. 已装兼容版：到“管理扩展程序”更新本仓库。首次安装：先在“管理扩展程序”停用原版扩展本体，保存后刷新，再通过“安装扩展程序”粘贴上述地址。
-3. 保存后刷新，确认版本是 `0.4.3-compat.2`。首次加载此版默认关闭，不继承 compat.1 的开启状态。
+3. 保存后刷新，确认版本是 `0.4.3-compat.3`。首次加载此版默认关闭，不继承 compat.2 的开启状态。
 4. 核对酒馆助手的使用条件，把“阅读窗口楼层”设为 10，保存、刷新后手动开启。
 5. 先慢慢上下阅读，再按 [iOS 验收清单](docs/IOS-验收清单.md) 测试快速滑动与持续使用。若重载更频繁，立即关闭并回报。
 
@@ -48,9 +50,9 @@ https://github.com/djskfjs/sillytavern-dom-window-compat
 
 ## 测试与开发
 
-`npm test` 使用系统 Chrome 与 Playwright，全部测试只运行合成聊天和模拟接口，包含助手的数字范围审计、DOM 替换监听与强引用保留模型。它不能代替真实酒馆或 Safari 测试。
+`npm test` 使用系统 Chrome 与 Playwright，全部测试只运行合成聊天和模拟接口，包含助手的数字范围审计、DOM 替换监听与强引用保留模型。`npm run test:scroll` 单独验证滚动过程中位移、持续滑动恢复、长源码和 60 次小幅滚轮输入。它不能代替 iPhone Chrome 或 Safari 测试。
 
-环境变量：`DOM_WINDOW_BROWSER` 指定已有 Chromium；`DOM_WINDOW_BASELINE` 指向原版源码；`DOM_WINDOW_TEST_OUTPUT` 指定记录目录。上一测试版复现用例读取相邻 `dom-window-compat`，缺少该目录时可以跳过其单独复现用例。测试不使用真实聊天正文或密钥。
+环境变量：`DOM_WINDOW_BROWSER` 指定已有 Chromium；`DOM_WINDOW_BASELINE` 指向原版源码；`DOM_WINDOW_PREVIOUS` 指向 compat.1 源码；`DOM_WINDOW_TEST_OUTPUT` 指定记录目录。上一测试版复现用例缺少源码目录时跳过。`DOM_WINDOW_TEST_SOURCE` 可让滚动专项测试读取另一份扩展源码，用于对比 compat.2。测试不使用真实聊天正文或密钥。
 
 结果见 [测试记录](docs/测试记录.md) 和 `docs/TEST-RESULTS.json`。原版说明保留在 `docs/UPSTREAM-README.md`，历史记录保留在 `CHANGELOG.md`。
 

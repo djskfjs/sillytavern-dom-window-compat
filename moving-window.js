@@ -1,3 +1,5 @@
+import { hasFrontendCandidate } from './render-queue.js';
+
 /** Continuous reading window; chat data and saved message IDs are untouched. */
 export function createMovingWindow({ state, config, getRoot, getChat, mountMessage,
   renderQueue, refreshMessages, lifecycle, onFailure, onRangeChanged = () => {} }) {
@@ -11,6 +13,10 @@ export function createMovingWindow({ state, config, getRoot, getChat, mountMessa
   let lastScrollTop = 0;
   let observer = null;
   let transitionGeometry = null;
+  let originalScrollAnchor = null;
+  const reservations = new Map();
+  const transitionSlots = new Set();
+  const settledDuringTransition = new Set();
   const root = () => getRoot();
   const rows = () => [...(root()?.querySelectorAll(':scope > .mes') || [])];
   const size = () => Math.min(getChat().length, Math.max(1, Math.trunc(Number(config.minWindow) || 5)));
@@ -56,6 +62,9 @@ export function createMovingWindow({ state, config, getRoot, getChat, mountMessa
   }
   function scrollTo(value) {
     const chat = root();
+    value = Math.max(0, Math.min(value, chat.scrollHeight - chat.clientHeight));
+    // Even assigning the current value can cancel WebKit's touch momentum.
+    if (Math.abs(chat.scrollTop - value) < 0.5) return;
     chat.scrollTop = value;
     correction = chat.scrollTop;
     lastScrollTop = chat.scrollTop;
@@ -64,20 +73,47 @@ export function createMovingWindow({ state, config, getRoot, getChat, mountMessa
     const chat = root();
     if (!chat) return null;
     const top = chat.getBoundingClientRect().top;
-    const element = rows().find(el => el.getBoundingClientRect().bottom > top);
+    const element = rows().find(el => {
+      const rect = el.getBoundingClientRect();
+      return rect.bottom > top && rect.top < top + chat.clientHeight;
+    });
     return { element, top: element?.getBoundingClientRect().top,
       atBottom: chat.scrollHeight - chat.scrollTop - chat.clientHeight < 40,
       revision: state.scrollRevision };
   }
   function restoreAnchor(anchor) {
     if (!anchor || anchor.revision !== state.scrollRevision) return;
+    // A touch scroll can land before its scroll event is dispatched.
+    if (Math.abs(root().scrollTop - lastScrollTop) > 1) return;
     if (anchor.atBottom) scrollTo(root().scrollHeight);
     else if (anchor.element?.isConnected && anchor.top !== undefined) {
       scrollTo(root().scrollTop + anchor.element.getBoundingClientRect().top - anchor.top);
     }
   }
-  function afterRefresh(_item, anchor) {
-    if (!state.enabled || changing) return;
+  function reserveHeight(element, id) {
+    if (!hasFrontendCandidate(getChat()[id], element) || reservations.has(element)) return;
+    const css = getComputedStyle(element);
+    const outside = (parseFloat(css.marginTop) || 0) + (parseFloat(css.marginBottom) || 0) +
+      (parseFloat(getComputedStyle(root()).rowGap) || 0);
+    const padding = css.boxSizing === 'border-box' ? 0 :
+      (parseFloat(css.paddingTop) || 0) + (parseFloat(css.paddingBottom) || 0) +
+      (parseFloat(css.borderTopWidth) || 0) + (parseFloat(css.borderBottomWidth) || 0);
+    reservations.set(element, { value: element.style.getPropertyValue('min-height'), priority: element.style.getPropertyPriority('min-height') });
+    element.style.setProperty('min-height', `${Math.max(parseFloat(css.minHeight) || 0, estimatedHeight(id) - outside - padding)}px`);
+    element.classList.add('dom-window-render-pending');
+  }
+  function releaseHeight(element) {
+    const saved = reservations.get(element);
+    if (!saved) return;
+    if (saved.value) element.style.setProperty('min-height', saved.value, saved.priority);
+    else element.style.removeProperty('min-height');
+    reservations.delete(element);
+  }
+  function afterRefresh(item, anchor) {
+    if (!state.enabled) return;
+    if (changing) { settledDuringTransition.add(item.element); return; }
+    anchor = layoutAnchor?.revision === state.scrollRevision ? layoutAnchor : anchor;
+    releaseHeight(item.element);
     measure(); layout(); restoreAnchor(anchor);
     layoutAnchor = captureAnchor();
     onRangeChanged();
@@ -97,6 +133,14 @@ export function createMovingWindow({ state, config, getRoot, getChat, mountMessa
     element.className = `dom-window-spacer dom-window-${side}`;
     element.style.cssText = 'display:block;width:100%;flex:0 0 auto;pointer-events:none;';
     return element;
+  }
+  function holdRemovedSpace(element) {
+    const css = getComputedStyle(element), slot = document.createElement('div');
+    slot.className = 'dom-window-transition';
+    slot.style.cssText = 'box-sizing:border-box;flex:0 0 auto;pointer-events:none;';
+    slot.style.height = `${element.getBoundingClientRect().height}px`;
+    slot.style.marginTop = css.marginTop; slot.style.marginBottom = css.marginBottom;
+    element.before(slot); transitionSlots.add(slot);
   }
   function desiredRange(id, atBottom = false) {
     const length = getChat().length, capacity = size();
@@ -168,6 +212,9 @@ export function createMovingWindow({ state, config, getRoot, getChat, mountMessa
         if (wanted && (!references.has(element) || references.get(element) === data[id])) continue;
         state.heights.set(id, height(element));
         renderQueue.discard([id]); observer?.unobserve(element);
+        // Removing rows before the asynchronous helper cleanup used to collapse
+        // the document, move the reader, and clamp scrollTop at the new bottom.
+        holdRemovedSpace(element); releaseHeight(element);
         if (window.jQuery) window.jQuery(element).remove(); else element.remove();
         removed.push(id);
       }
@@ -189,6 +236,7 @@ export function createMovingWindow({ state, config, getRoot, getChat, mountMessa
             : previous ? { afterId: idOf(previous) } : {});
           element = result?.el;
           if (!element) throw new Error(`Cannot mount floor ${id}`);
+          reserveHeight(element, id);
           if (result.created) created.push(id);
         }
         references.set(element, data[id]);
@@ -202,6 +250,7 @@ export function createMovingWindow({ state, config, getRoot, getChat, mountMessa
       });
       elementOf(state.pinnedId).classList.add('last_mes');
       measure(); layout();
+      transitionSlots.forEach(slot => slot.remove()); transitionSlots.clear();
       const anchor = next.anchor;
       if (anchor?.revision === state.scrollRevision && anchor.atBottom) scrollTo(chat.scrollHeight);
       else if (anchor?.revision === state.scrollRevision && anchor.element?.isConnected) scrollTo(chat.scrollTop + anchor.element.getBoundingClientRect().top - anchor.top);
@@ -216,7 +265,17 @@ export function createMovingWindow({ state, config, getRoot, getChat, mountMessa
       refreshMessages(needsRefresh, { owns: () => true });
       layoutAnchor = captureAnchor();
       onRangeChanged();
-    } finally { changing = false; state.applying = false; transitionGeometry = null; }
+    } finally {
+      transitionSlots.forEach(slot => slot.remove()); transitionSlots.clear();
+      changing = false; state.applying = false; transitionGeometry = null;
+      if (settledDuringTransition.size) {
+        const anchor = captureAnchor();
+        settledDuringTransition.forEach(releaseHeight); settledDuringTransition.clear();
+        if (state.enabled && state.mounted) {
+          measure(); layout(); restoreAnchor(anchor); layoutAnchor = captureAnchor();
+        }
+      }
+    }
   }
   async function drain() {
     if (changing) return;
@@ -227,6 +286,7 @@ export function createMovingWindow({ state, config, getRoot, getChat, mountMessa
   }
   function requestRange(range, anchor) {
     if (renderQueue.snapshot().stalled) return;
+    if (!changing && range.start === state.start && range.end === state.end && matches()) return;
     target = { ...range, anchor: { ...anchor, revision: state.scrollRevision } };
     void drain();
   }
@@ -240,6 +300,11 @@ export function createMovingWindow({ state, config, getRoot, getChat, mountMessa
   function apply(force = false) {
     if (!state.enabled || !getChat().length || (!force && matches())) return false;
     generation++; target = null;
+    if (!originalScrollAnchor) {
+      const element = root();
+      originalScrollAnchor = { element, value: element.style.getPropertyValue('overflow-anchor'), priority: element.style.getPropertyPriority('overflow-anchor') };
+      element.style.setProperty('overflow-anchor', 'none');
+    }
     renderQueue.cancel(); observer?.disconnect();
     state.heights.clear(); fallbackHeight = 0; measure();
     requestRange(desiredRange(getChat().length - 1, true), { atBottom: true });
@@ -301,6 +366,15 @@ export function createMovingWindow({ state, config, getRoot, getChat, mountMessa
     const ids = rows().map(idOf);
     renderQueue.cancel();
     rows().forEach(el => { if (window.jQuery) window.jQuery(el).remove(); else el.remove(); });
+    for (const element of reservations.keys()) releaseHeight(element);
+    settledDuringTransition.clear();
+    transitionSlots.forEach(slot => slot.remove()); transitionSlots.clear();
+    if (originalScrollAnchor) {
+      const { element, value, priority } = originalScrollAnchor;
+      if (value) element.style.setProperty('overflow-anchor', value, priority);
+      else element.style.removeProperty('overflow-anchor');
+      originalScrollAnchor = null;
+    }
     state.topSpacer?.remove(); state.bottomSpacer?.remove();
     state.topSpacer = null; state.bottomSpacer = null; state.mounted = false;
     await lifecycle.release(ids);
