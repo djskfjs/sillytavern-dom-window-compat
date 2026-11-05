@@ -24,7 +24,7 @@ await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const browser = await chromium.launch({ headless: true, executablePath: process.env.DOM_WINDOW_BROWSER || 'C:/Program Files/Google/Chrome/Application/chrome.exe' });
 const results = [];
 async function idle(page) {
-  await page.waitForFunction(() => { const a = window.STDOMWindow.audit(); return a.mounted && !a.applying && !a.renderQueue.pending && !a.renderQueue.running; });
+  await page.waitForFunction(() => { const a = window.STDOMWindow?.audit(); return a?.mounted && !a.applying && !a.renderQueue.pending && !a.renderQueue.running; });
   await page.waitForTimeout(100);
 }
 async function run(name, query, test) {
@@ -124,6 +124,55 @@ try {
     const backtracks = samples.slice(1).filter((value,i) => value > samples[i] + 0.02).length;
     assert.equal(backtracks, 0, JSON.stringify(samples));
     return { before, after, backtracks };
+  });
+  await run('Changing 10 to 15 to 5 floors preserves the reader without reload', 'frameHeight=900', async page => {
+    await page.evaluate(() => window.fixture.jumpTopSpacer(0.55)); await idle(page);
+    const before = await page.evaluate(() => {
+      const root=document.querySelector('#chat'), y=root.getBoundingClientRect().top+root.clientHeight/2;
+      const row=[...root.querySelectorAll(':scope > .mes')].find(el=>{const r=el.getBoundingClientRect();return r.top<=y&&r.bottom>=y;});
+      return { id:row.getAttribute('mesid'), top:row.getBoundingClientRect().top, instance:row.querySelector('iframe').dataset.instance,
+        boots:sessionStorage.getItem('fixture.boots'), data:JSON.stringify(window.fixture.ctx.chat) };
+    });
+    const reports=[];
+    for (const size of [15,5]) {
+      await page.locator('#dom_window_preload').fill(String(size)); await page.locator('#dom_window_preload_save').click(); await idle(page);
+      const after=await page.evaluate(id=>{
+        const row=document.querySelector(`#chat > .mes[mesid="${id}"]`);
+        return {top:row?.getBoundingClientRect().top,instance:row?.querySelector('iframe').dataset.instance,audit:window.STDOMWindow.audit(),
+          boots:sessionStorage.getItem('fixture.boots'),data:JSON.stringify(window.fixture.ctx.chat)};
+      },before.id);
+      assert.equal(after.boots,before.boots); assert.equal(after.data,before.data); assert.equal(after.instance,before.instance);
+      assert.equal(after.audit.end-after.audit.start+1,size); assert(Math.abs(after.top-before.top)<2,JSON.stringify({before,after}));
+      reports.push({size,shift:after.top-before.top});
+    }
+    return reports;
+  });
+  await run('One activation adapts both helper settings and closing restores them', 'helperDepth=8&helperStreaming=1', async page => {
+    const adapted=await page.evaluate(()=>({boots:Number(sessionStorage.getItem('fixture.boots')),settings:window.fixture.ctx.extensionSettings}));
+    assert.equal(adapted.boots,2); assert.equal(adapted.settings.tavern_helper.render.depth,0);
+    assert.equal(adapted.settings.tavern_helper.render.allow_streaming,false);
+    assert.deepEqual(Object.values(adapted.settings.STDOMWindow_helper_backup)[0].original,{depth:8,allow_streaming:true});
+    await page.locator('#dom_window_autostart').uncheck();
+    await page.waitForFunction(()=>Number(sessionStorage.getItem('fixture.boots'))===3&&window.fixtureReady&&!window.STDOMWindow?.enabled);
+    const restored=await page.evaluate(()=>window.fixture.ctx.extensionSettings);
+    assert.equal(restored.tavern_helper.render.depth,8); assert.equal(restored.tavern_helper.render.allow_streaming,true);
+    assert.equal(restored.STDOMWindow_helper_backup,undefined);
+    return {activationReloads:1,closingReloads:1,restoredDepth:8,restoredStreaming:true};
+  });
+  await run('Interrupted shutdown recovers the saved helper preferences on reload', 'helperDepth=6', async page => {
+    await page.evaluate(()=>localStorage.setItem('STDOMWindow.scrollfix.enabled','0')); await page.reload();
+    await page.waitForFunction(()=>Number(sessionStorage.getItem('fixture.boots'))===4&&window.fixtureReady&&!window.STDOMWindow?.enabled);
+    const restored=await page.evaluate(()=>window.fixture.ctx.extensionSettings);
+    assert.equal(restored.tavern_helper.render.depth,6); assert.equal(restored.STDOMWindow_helper_backup,undefined);
+    return {restoredDepth:6};
+  });
+  await run('Missing randomUUID and changing capacity while closed require no reload', 'noUUID=1', async page => {
+    const boots=await page.evaluate(()=>sessionStorage.getItem('fixture.boots'));
+    await page.locator('#dom_window_autostart').uncheck(); await page.locator('#dom_window_preload').fill('12');
+    await page.locator('#dom_window_preload_save').click();
+    const state=await page.evaluate(()=>({boots:sessionStorage.getItem('fixture.boots'),owner:localStorage.getItem('STDOMWindow.compat.device'),size:localStorage.getItem('STDOMWindow.compat.preload')}));
+    assert.equal(state.boots,boots); assert.equal(state.size,'12'); assert.match(state.owner,/^dw-/);
+    return {reloads:0,savedSize:12};
   });
 } finally {
   await browser.close(); await new Promise(resolve => server.close(resolve));

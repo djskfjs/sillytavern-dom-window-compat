@@ -8,13 +8,14 @@
         <div class="inline-drawer-content">
             <label class="checkbox_label" for="dom_window_autostart">
                 <input type="checkbox" id="dom_window_autostart">
-                <small>进入聊天时自动开启</small>
+                <small>启用窗口（下次进入自动开启）</small>
             </label>
             <div class="dom-window-preload">
                 <label for="dom_window_preload"><small>阅读窗口楼层</small></label>
                 <input type="number" id="dom_window_preload" min="1" max="100" step="1" value="5" inputmode="numeric">
                 <button type="button" id="dom_window_preload_save" class="menu_button">保存</button>
             </div>
+            <small id="dom_window_compatibility" class="dom-window-compat-note" aria-live="polite"></small>
             <div id="dom_window_status" class="dom-window-status" data-enabled="false">
                 <div class="dom-window-status-line">
                     <span id="dom_window_timer">运行 00:00:00</span>
@@ -22,7 +23,7 @@
                 </div>
                 <div id="dom_window_metrics" class="dom-window-status-metrics">窗口 — · 已加载 0/0 层<br>DOM 0 · 堆内存 —</div>
             </div>
-            <small class="dom-window-compat-note">0.4.3-compat.3：修正滚动被拉回、回收期间高度塌陷和持续滑动时前端迟迟不恢复。看旧记录时另保留最后一层。酒馆助手需为 4.12.0，渲染深度 0，关闭流式渲染。升级后默认关闭，需手动开启；iPhone 实际效果仍需验证。</small>
+            <small class="dom-window-compat-note">0.4.3-compat.4：开启时自动适配助手，关闭后还原。首次适配或还原需要自动刷新一次。已适配酒馆助手 4.12.0；阅读旧记录时另保留最后一层。iPhone 实际效果仍需验证。</small>
         </div>
     </div>
 </div>

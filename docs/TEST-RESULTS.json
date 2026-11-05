@@ -1,10 +1,12 @@
 {
   "date": "2026-11-05",
-  "version": "0.4.3-compat.3",
+  "version": "0.4.3-compat.4",
   "engine": "Chrome headless",
-  "passed": 24,
-  "scrollPassed": 6,
-  "findings": [
+  "settingsChecksPassed": 11,
+  "browserChecksPassed": 24,
+  "interactionChecksPassed": 10,
+  "totalPassed": 45,
+  "general": [
     {
       "case": "模型复现助手强引用残留及目标回收",
       "result": "passed"
@@ -107,7 +109,7 @@
       "result": "passed"
     }
   ],
-  "scrolling": [
+  "interactions": [
     {
       "name": "No scroll write for a resize below the reader",
       "passed": true,
@@ -116,14 +118,14 @@
     {
       "name": "Continuous scrolling cannot starve visible frontend recovery",
       "passed": true,
-      "detail": 245.20000000018626
+      "detail": 240.90000000596046
     },
     {
       "name": "Slow helper cleanup keeps the overlapping row stationary",
       "passed": true,
       "detail": {
         "maxShift": 0,
-        "samples": 150
+        "samples": 149
       }
     },
     {
@@ -149,43 +151,46 @@
         "after": 191.53065539112052,
         "backtracks": 0
       }
-    }
-  ],
-  "compat2Comparison": [
-    {
-      "name": "No scroll write for a resize below the reader",
-      "passed": false,
-      "error": "[{\"before\":147523,\"value\":147523}]\n\n1 !== 0\n"
     },
     {
-      "name": "Continuous scrolling cannot starve visible frontend recovery",
-      "passed": false,
-      "error": "recovery start: null"
+      "name": "Changing 10 to 15 to 5 floors preserves the reader without reload",
+      "passed": true,
+      "detail": [
+        {
+          "size": 15,
+          "shift": 0
+        },
+        {
+          "size": 5,
+          "shift": 0
+        }
+      ]
     },
     {
-      "name": "Slow helper cleanup keeps the overlapping row stationary",
-      "passed": false,
-      "error": "{\"maxShift\":1908,\"samples\":149}"
-    },
-    {
-      "name": "Native scroll anchoring is disabled only while the window is enabled",
-      "passed": false,
-      "error": "Expected values to be strictly equal:\n\n'auto' !== 'none'\n"
-    },
-    {
-      "name": "Long hidden source does not become a giant blank row",
-      "passed": false,
-      "error": "[18065.1875,18065.1875,18065.1875,18065.1875,18065.1875,18065.1875,18065.1875,18065.1875,18065.1875,18065.1875]"
-    },
-    {
-      "name": "Small upward wheel gestures keep making progress",
+      "name": "One activation adapts both helper settings and closing restores them",
       "passed": true,
       "detail": {
-        "before": 185.39429175475686,
-        "after": 180.34566596194503,
-        "backtracks": 0
+        "activationReloads": 1,
+        "closingReloads": 1,
+        "restoredDepth": 8,
+        "restoredStreaming": true
+      }
+    },
+    {
+      "name": "Interrupted shutdown recovers the saved helper preferences on reload",
+      "passed": true,
+      "detail": {
+        "restoredDepth": 6
+      }
+    },
+    {
+      "name": "Missing randomUUID and changing capacity while closed require no reload",
+      "passed": true,
+      "detail": {
+        "reloads": 0,
+        "savedSize": 12
       }
     }
   ],
-  "limitation": "桌面 Chrome、390px 视口、合成聊天与模拟助手；未执行 iPhone Chrome 真机验收。"
+  "limitation": "桌面 Chrome、合成消息与独立保存/生效设置模型；未完成 iPhone Chrome 真机验收。"
 }
