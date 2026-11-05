@@ -1,4 +1,6 @@
 const params = new URLSearchParams(location.search);
+if (params.has('noUUID')) Object.defineProperty(crypto, 'randomUUID', { value: undefined });
+sessionStorage.setItem('fixture.boots', String(Number(sessionStorage.getItem('fixture.boots') || 0) + 1));
 const delay = Number(params.get('delay') ?? 35);
 const legacy = params.get('api') === 'legacy';
 const count = Number(params.get('count') || 337);
@@ -11,9 +13,10 @@ let token = 1, initializing = true, active = 0;
 const listeners = new Map(), runtimes = new Map();
 const ctx = {
   chat: [], powerUserSettings: { chat_truncation: 20 },
-  extensionSettings: { tavern_helper: { render: { enabled: true, depth: 0, allow_streaming: false } } },
+  extensionSettings: JSON.parse(localStorage.getItem('fixture.settings') || 'null') ||
+    { tavern_helper: { render: { enabled: true, depth: Number(params.get('helperDepth') || 0), allow_streaming: params.has('helperStreaming') } } },
   event_types: Object.fromEntries(['CHAT_CHANGED', 'CHARACTER_MESSAGE_RENDERED', 'USER_MESSAGE_RENDERED',
-    'MESSAGE_DELETED', 'MESSAGE_UPDATED', 'MESSAGE_SWIPED', 'MORE_MESSAGES_LOADED'].map(name => [name, name])),
+    'MESSAGE_DELETED', 'MESSAGE_UPDATED', 'MESSAGE_SWIPED', 'MORE_MESSAGES_LOADED', 'SETTINGS_UPDATED'].map(name => [name, name])),
   eventSource: {
     on(name, fn) { if (!listeners.has(name)) listeners.set(name, new Set()); listeners.get(name).add(fn); },
     off(name, fn) { listeners.get(name)?.delete(fn); },
@@ -22,6 +25,9 @@ const ctx = {
   saveSettingsDebounced() { window.stats.settingSaves++; },
   saveChat() { throw Error('扩展不应保存或修改测试聊天'); },
 };
+// Helper has its own live reactive copy; changing extensionSettings alone does
+// not change its renderer until the next page load.
+const liveRenderSettings = structuredClone(ctx.extensionSettings.tavern_helper.render);
 function makeMessages(size) {
   return Array.from({ length: size }, (_, id) => Object.freeze({
     mes: params.get('raw') === 'html' ? `<html><body>${token}:${id}</body></html>` : `<scene data-id="${id}">场景 ${token}:${id}</scene>`,
@@ -65,8 +71,8 @@ function auditRuntimes(render = true) {
   const tail = ctx.chat.length - 1;
   // Faithful to helper's ID-range audit: no isConnected or DOM identity check.
   for (const [id, runtime] of runtimes) if (runtime.token !== token || id < first || id > tail) destroyRuntime(id);
-  if (!render || !ctx.extensionSettings.tavern_helper.render.enabled) return;
-  const depth = ctx.extensionSettings.tavern_helper.render.depth;
+  if (!render || !liveRenderSettings.enabled || liveRenderSettings.allow_streaming) return;
+  const depth = liveRenderSettings.depth;
   for (const element of elements) {
     const id = Number(element.getAttribute('mesid')); if (!depth || id >= ctx.chat.length - depth) addRuntime(element);
   }
@@ -100,6 +106,15 @@ Object.defineProperties(window.stats, {
 window.SillyTavern = { getContext: () => ctx };
 window.TavernHelper = {
   getTavernHelperVersion: () => params.get('helperVersion') || '4.12.0',
+  builtin: {
+    duringGenerating: () => !!window.fixtureGenerating,
+    async saveSettings() {
+      window.stats.settingSaves++;
+      if (params.has('saveFailure')) return;
+      localStorage.setItem('fixture.settings', JSON.stringify(ctx.extensionSettings));
+      await ctx.eventSource.emit(ctx.event_types.SETTINGS_UPDATED);
+    },
+  },
   async refreshOneMessage(id, $mes) {
     const node = $mes?.[0] || document.querySelector(`#chat > .mes[mesid="${id}"]`), targetToken = token;
     const tracked = !initializing;
