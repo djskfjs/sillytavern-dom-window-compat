@@ -92,10 +92,10 @@ try {
     });
     assert.deepEqual(held, { retained: true, released: true }); await pass('模型复现助手强引用残留及目标回收', page, errors);
   }
-  {
+  if (existsSync(path.join(baseline, 'index.js'))) {
     const { page, errors } = await open('variant=baseline&count=337&noRecovery=1'); await enable(page); await page.waitForTimeout(600);
     assert.equal((await state(page)).frames.length, 0); await pass('隔离原版HTML标记检查（关闭助手DOM恢复监听）', page, errors);
-  }
+  } else console.log('SKIP historical upstream comparison: set DOM_WINDOW_BASELINE to its source checkout');
   if (existsSync(path.join(previousSource, 'index.js')) && previousSource !== root) {
     const { page, errors } = await open('variant=previous&count=2601&preload=10'); await enable(page); await page.waitForTimeout(700);
     await page.evaluate(() => window.fixture.jumpTopSpacer(0.4)); await page.waitForTimeout(500); const data = await state(page);
@@ -230,8 +230,9 @@ try {
   {
     const { page, errors } = await open('variant=compat&count=337&preload=10'); await enable(page); await idle(page);
     await page.evaluate(async () => { window.failMountId = 0; await window.fixture.scrollToFraction(0); });
-    await page.waitForFunction(() => !window.STDOMWindow.enabled); await idle(page); const data = await state(page);
-    assert.equal(data.ids.length, 20); assert.equal(data.stats.detachedRuntimeCount, 0); await pass('挂载异常后关闭并恢复普通展示', page, errors);
+    await page.waitForFunction(() => window.STDOMWindow.audit().paused); const data = await state(page);
+    assert.equal(data.audit.enabled, true); assert(data.ids.length <= 11); assert(data.ids.includes(336));
+    assert.equal(data.stats.detachedRuntimeCount, 0); await pass('挂载异常后暂停并保留末楼，不批量恢复', page, errors);
   }
   {
     const { page, errors } = await open('variant=compat&count=337&seed=legacy'); await page.waitForTimeout(1300);

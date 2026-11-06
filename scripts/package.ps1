@@ -1,4 +1,4 @@
-param([string]$OutputDirectory)
+param([string]$OutputDirectory, [string]$PreviewLabel = ('本地预览-' + (Get-Date -Format 'yyyyMMdd') + '-通用浏览器兼容'), [switch]$Release)
 $ErrorActionPreference = 'Stop'
 $taskSource = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $taskWorkspace = Split-Path -Parent $taskSource
@@ -12,7 +12,7 @@ $taskSourcePackage = Join-Path $taskStage 'source/dom-window-compat'
 New-Item -ItemType Directory -Force -Path $taskOutputs,$taskInstall,$taskSourcePackage | Out-Null
 $taskManifest = Get-Content -LiteralPath (Join-Path $taskSource 'manifest.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskVersion = $taskManifest.version
-$taskRuntimeFiles = @('index.js','render-queue.js','moving-window.js','helper-lifecycle.js','helper-setup.js','manifest.json','settings.html','style.css','LICENSE','README.md','CHANGELOG.md')
+$taskRuntimeFiles = @('index.js','render-queue.js','moving-window.js','helper-lifecycle.js','helper-setup.js','runtime-support.js','manifest.json','settings.html','style.css','LICENSE','README.md','CHANGELOG.md')
 foreach ($taskFile in $taskRuntimeFiles) {
     Copy-Item -LiteralPath (Join-Path $taskSource $taskFile) -Destination (Join-Path $taskInstall $taskFile)
 }
@@ -27,8 +27,13 @@ foreach ($taskFile in $taskFiles) {
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $taskDestination) | Out-Null
     Copy-Item -LiteralPath $taskInput -Destination $taskDestination
 }
-$taskInstallZip = Join-Path $taskOutputs ('DOM-Window-兼容测试版-' + $taskVersion + '.zip')
-$taskSourceZip = Join-Path $taskOutputs ('DOM-Window-完整源码-' + $taskVersion + '.zip')
+if ($Release) { $taskPackageLabel = $taskVersion }
+else {
+    if ($PreviewLabel -notmatch '^本地预览-[\p{L}\p{N}-]+$') { throw 'Preview label must be a safe local preview name' }
+    $taskPackageLabel = $PreviewLabel
+}
+$taskInstallZip = Join-Path $taskOutputs ('DOM-Window-' + $taskPackageLabel + '.zip')
+$taskSourceZip = Join-Path $taskOutputs ('DOM-Window-完整源码-' + $taskPackageLabel + '.zip')
 Compress-Archive -LiteralPath $taskInstall -DestinationPath $taskInstallZip -Force
 Compress-Archive -LiteralPath $taskSourcePackage -DestinationPath $taskSourceZip -Force
 Add-Type -AssemblyName System.IO.Compression.FileSystem

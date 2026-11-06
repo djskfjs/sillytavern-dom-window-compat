@@ -23,7 +23,14 @@
                 </div>
                 <div id="dom_window_metrics" class="dom-window-status-metrics">窗口 — · 已加载 0/0 层<br>DOM 0 · 堆内存 —</div>
             </div>
-            <small class="dom-window-compat-note">0.4.3-compat.4：开启时自动适配助手，关闭后还原。首次适配或还原需要自动刷新一次。已适配酒馆助手 4.12.0；阅读旧记录时另保留最后一层。iPhone 实际效果仍需验证。</small>
+            <div class="dom-window-actions">
+                <button type="button" id="dom_window_reload" class="menu_button" hidden>刷新页面</button>
+                <button type="button" id="dom_window_restore" class="menu_button" hidden>恢复原助手设置</button>
+                <button type="button" id="dom_window_diagnostics" class="menu_button">复制诊断信息</button>
+            </div>
+            <textarea id="dom_window_diagnostics_output" class="text_pole" aria-label="诊断信息，可全选复制" readonly hidden></textarea>
+            <small class="dom-window-compat-note">0.4.3-compat.5 · 通用浏览器兼容。后台暂停恢复，异常保留页面；暂停后不再限制新增楼层，可在方便时手动刷新。诊断仅含浏览器版本、运行状态和数量，不含聊天内容、网址或密钥。</small>
+            <small class="dom-window-compat-note">助手前端回收已适配 4.12.0；其他版本会显示原因并保留原聊天。减少楼层可以减轻负担，但无法保证阻止系统回收网页。</small>
         </div>
     </div>
 </div>

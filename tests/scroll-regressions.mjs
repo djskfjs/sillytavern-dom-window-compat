@@ -159,8 +159,12 @@ try {
     assert.equal(restored.STDOMWindow_helper_backup,undefined);
     return {activationReloads:1,closingReloads:1,restoredDepth:8,restoredStreaming:true};
   });
-  await run('Interrupted shutdown recovers the saved helper preferences on reload', 'helperDepth=6', async page => {
+  await run('Interrupted shutdown waits for explicit restoration without an automatic reload', 'helperDepth=6', async page => {
     await page.evaluate(()=>localStorage.setItem('STDOMWindow.scrollfix.enabled','0')); await page.reload();
+    await page.locator('#dom_window_restore').waitFor({state:'visible'});
+    await page.waitForTimeout(1200);
+    assert.equal(await page.evaluate(()=>Number(sessionStorage.getItem('fixture.boots'))),3);
+    await page.locator('#dom_window_restore').click();
     await page.waitForFunction(()=>Number(sessionStorage.getItem('fixture.boots'))===4&&window.fixtureReady&&!window.STDOMWindow?.enabled);
     const restored=await page.evaluate(()=>window.fixture.ctx.extensionSettings);
     assert.equal(restored.tavern_helper.render.depth,6); assert.equal(restored.STDOMWindow_helper_backup,undefined);

@@ -1,5 +1,5 @@
 /**
- * DOM Window 0.4.3-compat.4 — compatibility test build
+ * DOM Window 0.4.3-compat.5 — browser compatibility build
  *
  * 只窗口化 ST 的消息 DOM，不改 chat 数据。
  * - chat 数组保持完整，AI 上下文、存档、消息 ID 不变。
@@ -11,10 +11,11 @@
  * - STDOMWindow.getChat() 返回完整 chat
  * - STDOMWindow.getMessageElement(mesid) 按需挂载某一层
  */
-import { createRenderQueue } from './render-queue.js';
-import { createMovingWindow } from './moving-window.js';
-import { createHelperLifecycle } from './helper-lifecycle.js';
-import { createHelperSetup } from './helper-setup.js';
+import { createRenderQueue } from './render-queue.js?v=0.4.3-compat.5';
+import { createMovingWindow } from './moving-window.js?v=0.4.3-compat.5';
+import { createHelperLifecycle } from './helper-lifecycle.js?v=0.4.3-compat.5';
+import { createHelperSetup } from './helper-setup.js?v=0.4.3-compat.5';
+import { createBrowserStorage, createDiagnostics } from './runtime-support.js?v=0.4.3-compat.5';
 
 let disposeExtension = () => {};
 export function disable() { return disposeExtension(); }
@@ -22,14 +23,19 @@ export function disable() { return disposeExtension(); }
 (() => {
   'use strict';
 
-  const VERSION = '0.4.3-compat.4';
+  const VERSION = '0.4.3-compat.5';
   const LOG = '[DOMWindow]';
   let extensionDisposed = false;
   let restoring = null;
   let reenableOptions = null;
   let preparing = null;
   let requestedEnable = false;
-  let recoveryAttempted = false;
+  let skipUnloadRefresh = false;
+  let pendingReload = '';
+  let helperWaitStarted = 0;
+  let lastCheckpoint = 0;
+  let pageAway = false;
+  let frozen = false;
   if (window.STDOMWindow) {
     console.warn(LOG, '检测到另一个 DOM Window 实例，兼容版未重复加载。请只启用一个版本。');
     return;
@@ -40,6 +46,9 @@ export function disable() { return disposeExtension(); }
   const PRELOAD_KEY = 'STDOMWindow.compat.preload';
   const DEFAULT_PRELOAD = 5;
   const MAX_PRELOAD = 100;
+  const storage = createBrowserStorage(() => window.localStorage);
+  const diagnostics = createDiagnostics({ storage: createBrowserStorage(() => window.sessionStorage), version: VERSION });
+  diagnostics.record('load');
   const FALLBACK_EVENTS = {
     APP_READY: 'app_ready',
     CHAT_CHANGED: 'chat_id_changed',
@@ -66,6 +75,8 @@ export function disable() { return disposeExtension(); }
 
   const state = {
     enabled: false,
+    paused: false,
+    background: document.hidden,
     mounted: false,
     chatEl: null,
     topSpacer: null,
@@ -153,35 +164,118 @@ export function disable() { return disposeExtension(); }
     beforeRefresh: () => movingWindow.captureAnchor(),
     afterRefresh: (item, anchor) => movingWindow.afterRefresh(item, anchor),
     onStall: () => {
-      state.lastRenderError = '助手前端恢复未响应，已暂停新的恢复任务。请关闭扩展后刷新。';
-      setAutoEnabled(false);
-      const checkbox = document.getElementById('dom_window_autostart');
-      if (checkbox) checkbox.checked = false;
-      updateStatusPanel();
-      void disable();
+      pauseWindow('render-timeout', '这一层加载时间过长，窗口已暂停。当前页面已保留，可在方便时点击“刷新页面”。');
     },
     onError: (id, error) => {
       state.lastRenderError = `第 ${id} 层前端恢复失败（${error?.name || 'Error'}），可关闭窗口模式重新进入。`;
       console.warn(LOG, '前端恢复失败', id, error?.name || 'Error');
+      diagnostics.record('render-error');
       updateStatusPanel();
     },
   });
 
   const helperLifecycle = createHelperLifecycle({ getRoot: getChatEl, getHelper: () => window.TavernHelper, getContext: getCtx });
   const deviceKey = 'STDOMWindow.compat.device';
-  const settingsOwner = localStorage.getItem(deviceKey) || globalThis.crypto?.randomUUID?.() ||
-    `dw-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-  localStorage.setItem(deviceKey, settingsOwner);
+  let settingsOwner = storage.getItem(deviceKey);
+  if (!/^[a-zA-Z0-9-]{8,80}$/.test(settingsOwner || '')) {
+    try { settingsOwner = globalThis.crypto?.randomUUID?.(); } catch {}
+    settingsOwner ||= `dw-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+    storage.setItem(deviceKey, settingsOwner);
+  }
   const helperSetup = createHelperSetup({ getHelper: () => window.TavernHelper, getContext: getCtx, owner: settingsOwner });
   const movingWindow = createMovingWindow({ state, config, getRoot: getChatEl, getChat, mountMessage, renderQueue,
     refreshMessages: refreshMountedMessages, lifecycle: helperLifecycle,
     onRangeChanged: () => updateStatusPanel(),
     onFailure: error => {
-      state.lastRenderError = '窗口恢复失败，已关闭并恢复普通展示。';
-      console.warn(LOG, state.lastRenderError, error?.name);
-      void disable();
+      console.warn(LOG, '窗口已暂停', error?.name);
+      pauseWindow('window-error', '窗口遇到兼容问题，已暂停并保留当前页面。可导出诊断信息，再点击“刷新页面”。');
     },
   });
+
+  function pauseWindow(reason, message) {
+    if (!state.enabled || state.paused) return;
+    state.paused = true;
+    state.lastRenderError = message;
+    clearTimeout(state.applyTimer); state.applyTimer = 0;
+    if (state.scrollRaf) cancelAnimationFrame(state.scrollRaf);
+    state.scrollRaf = 0;
+    renderQueue.cancel();
+    renderQueue.setSuspended(true);
+    movingWindow.suspend();
+    diagnostics.record(reason, diagnosticMetrics());
+    updateStatusPanel();
+  }
+
+  function diagnosticMetrics() {
+    const root = getChatEl(), queue = renderQueue.snapshot();
+    return { enabled: state.enabled, paused: state.paused, background: state.background,
+      chatLength: getChat().length, messagesInDom: root?.querySelectorAll(':scope > .mes').length || 0,
+      framesInChat: root?.querySelectorAll('iframe').length || 0,
+      framesInPage: document.querySelectorAll('iframe').length,
+      running: queue.running, pending: queue.pending, stalled: queue.stalled };
+  }
+
+  function getDiagnostics() {
+    diagnostics.checkpoint(diagnosticMetrics());
+    const check = helperLifecycle.inspect();
+    return { format: 1, version: VERSION, build: '通用浏览器兼容',
+      browser: navigator.userAgent, storageAvailable: storage.persistent,
+      helperVersion: typeof check.version === 'string' && /^[\w.+-]{1,40}$/.test(check.version) ? check.version : null,
+      helperCompatible: check.ok, windowSize: config.minWindow,
+      navigation: performance.getEntriesByType?.('navigation')?.[0]?.type || 'unknown',
+      ...diagnostics.snapshot() };
+  }
+
+  function requestReload(reason, interactive = false) {
+    const ctx = getCtx();
+    const generating = window.TavernHelper?.builtin?.duringGenerating?.() ||
+      (typeof ctx?.isGenerating === 'function' ? ctx.isGenerating() : ctx?.isGenerating === true);
+    if (!interactive || document.hidden || pageAway || frozen || generating) {
+      pendingReload = reason;
+      state.lastRenderError = generating ? '请等回复生成结束，再点击“刷新页面”。'
+        : '设置已保存；请在方便时点击“刷新页面”使其生效。';
+      diagnostics.record('reload-deferred');
+      updateStatusPanel();
+      return false;
+    }
+    diagnostics.markReload(reason);
+    diagnostics.record('reload-requested', diagnosticMetrics());
+    location.reload();
+    return true;
+  }
+
+  function updateVisibility(event) {
+    if (event.type === 'pagehide') pageAway = true;
+    if (event.type === 'pageshow') pageAway = false;
+    if (event.type === 'freeze') frozen = true;
+    if (event.type === 'resume') frozen = false;
+    const wasBackground = state.background;
+    state.background = document.hidden || pageAway || frozen;
+    renderQueue.setSuspended(state.background || state.paused);
+    diagnostics.record(event.type === 'visibilitychange' ? (state.background ? 'hidden' : 'visible') : event.type,
+      { background: state.background, persisted: !!event.persisted });
+    if (state.background) {
+      clearTimeout(state.applyTimer); state.applyTimer = 0;
+      if (state.scrollRaf) cancelAnimationFrame(state.scrollRaf);
+      state.scrollRaf = 0;
+    } else if (wasBackground && state.enabled && !state.paused) {
+      const check = helperLifecycle.inspect();
+      if (!check.ok) pauseWindow('helper-unavailable', `${check.reason} 窗口已暂停，当前页面已保留。`);
+      else {
+        movingWindow.resume();
+        if (!windowMatchesChat()) {
+          const appended = getChat().length > state.pinnedId + 1 && getChat()[state.pinnedId] === state.tailRef;
+          if (state.forceApply || !appended || !syncTail()) scheduleApply(0, state.forceApply);
+        }
+      }
+    }
+    if (!state.background) updateStatusPanel();
+  }
+  const pageEvents = ['pagehide', 'pageshow'];
+  const documentEvents = ['visibilitychange', 'freeze', 'resume'];
+  pageEvents.forEach(name => window.addEventListener(name, updateVisibility));
+  documentEvents.forEach(name => document.addEventListener(name, updateVisibility));
+  renderQueue.setSuspended(state.background);
 
   function mountMessage(id, { beforeId, afterId } = {}) {
     const ctx = getCtx();
@@ -218,6 +312,7 @@ export function disable() { return disposeExtension(); }
   // addOneMessage 只重建正文，不会补发消息渲染事件；酒馆助手的楼层界面
   // 依赖该事件生成 iframe，所以重新挂载后要主动刷新一次。
   function refreshMountedMessages(ids, { force = false, owns = element => mountedByUs.has(element) } = {}) {
+    if (state.paused) return;
     renderQueue.enqueue(ids, { force, owns });
   }
 
@@ -288,11 +383,15 @@ export function disable() { return disposeExtension(); }
 
   function windowMatchesChat() { return movingWindow.matches(); }
 
-  function apply(force = false) { return movingWindow.apply(force); }
+  function apply(force = false) {
+    if (state.paused || state.background) return false;
+    return movingWindow.apply(force);
+  }
 
   function scheduleApply(delay = 120, force = false) {
-    if (!state.enabled) return;
+    if (!state.enabled || state.paused) return;
     state.forceApply = state.forceApply || force;
+    if (state.background) return;
     clearTimeout(state.applyTimer);
     state.applyTimer = setTimeout(() => {
       state.applyTimer = 0;
@@ -308,6 +407,7 @@ export function disable() { return disposeExtension(); }
   function syncTail() { return movingWindow.syncTail(); }
 
   function handleExternalRender(id) {
+    if (state.paused || state.background) return;
     if (!state.mounted) {
       scheduleApply(250);
       return;
@@ -406,23 +506,43 @@ export function disable() { return disposeExtension(); }
     safe(() => getChatEl()?.removeEventListener('scroll', onScroll), 'unbind-scroll');
   }
 
-  async function enable(options = {}) {
+  async function enable(options = {}, { interactive = false } = {}) {
     requestedEnable = true;
     if (extensionDisposed) return false;
     if (preparing) return preparing;
+    if (pendingReload) { updateStatusPanel(); return true; }
     if (renderQueue.snapshot().stalled) { window.toastr?.warning('前端恢复未响应，请刷新酒馆后再试。'); return false; }
     if (restoring) { reenableOptions = options; return true; }
     if (state.enabled) return true;
     const ctx = getCtx();
     if (!ctx?.chat) {
       clearTimeout(state.enableTimer);
-      state.enableTimer = setTimeout(() => { state.enableTimer = 0; enable(options); }, 200);
+      state.enableTimer = setTimeout(() => { state.enableTimer = 0; void enable(options, { interactive }); }, 500);
       return true;
     }
 
     const lifecycleCheck = helperLifecycle.inspect();
     if (!lifecycleCheck.ok) {
+      if (lifecycleCheck.pending) {
+        helperWaitStarted ||= Date.now();
+        state.lastRenderError = lifecycleCheck.reason;
+        if (Date.now() - helperWaitStarted < 20000) {
+          clearTimeout(state.enableTimer);
+          state.enableTimer = setTimeout(() => { state.enableTimer = 0; void enable(options, { interactive: false }); }, 500);
+          updateStatusPanel();
+          return true;
+        }
+        state.lastRenderError = '酒馆助手尚未启动，窗口未开启。助手就绪后可重新勾选，原聊天保持显示。';
+        setAutoEnabled(false);
+        const checkbox = document.getElementById('dom_window_autostart');
+        if (checkbox) checkbox.checked = false;
+        updateStatusPanel(); return false;
+      }
       if (lifecycleCheck.canConfigure) {
+        if (!storage.persistent) {
+          state.lastRenderError = '浏览器未允许保存网站数据，无法安全备份助手设置。请允许保存后再开启。';
+          updateStatusPanel(); return false;
+        }
         preparing = (async () => {
           state.lastRenderError = '正在自动适配助手设置，保存成功后会刷新一次…';
           updateStatusPanel();
@@ -430,7 +550,8 @@ export function disable() { return disposeExtension(); }
             await helperSetup.configure();
             if (!requestedEnable) await helperSetup.restore();
             setAutoEnabled(requestedEnable);
-            location.reload();
+            pendingReload = 'helper-configured';
+            requestReload(pendingReload, interactive);
             return requestedEnable;
           } catch (error) {
             state.lastRenderError = error.message;
@@ -442,14 +563,22 @@ export function disable() { return disposeExtension(); }
         return preparing;
       }
       state.lastRenderError = lifecycleCheck.reason;
+      helperWaitStarted = 0;
+      setAutoEnabled(false);
+      const checkbox = document.getElementById('dom_window_autostart');
+      if (checkbox) checkbox.checked = false;
+      diagnostics.record('helper-unavailable');
       window.toastr?.warning(lifecycleCheck.reason);
       updateStatusPanel();
       return false;
     }
     Object.assign(config, options || {});
+    helperWaitStarted = 0;
     config.minWindow = Math.max(1, Math.min(MAX_PRELOAD, Math.trunc(Number(config.minWindow) || DEFAULT_PRELOAD)));
     config.maxWindow = config.minWindow;
     state.enabled = true;
+    state.paused = false;
+    renderQueue.setSuspended(state.background);
     state.lastRenderError = '';
     state.pinnedId = ctx.chat.length - 1;
     clearSelfRenders();
@@ -457,8 +586,8 @@ export function disable() { return disposeExtension(); }
     if (config.manageTruncation) {
       const current = ctx.powerUserSettings?.chat_truncation ?? null;
       state.originalTruncation = current;
-      if (current != null && localStorage.getItem(TRUNCATION_KEY) == null) {
-        localStorage.setItem(TRUNCATION_KEY, String(current));
+      if (current != null && storage.getItem(TRUNCATION_KEY) == null) {
+        storage.setItem(TRUNCATION_KEY, String(current));
       }
       if (ctx.powerUserSettings) {
         ctx.powerUserSettings.chat_truncation = config.maxWindow + 10;
@@ -468,19 +597,28 @@ export function disable() { return disposeExtension(); }
 
     bindEvents();
     apply();
+    diagnostics.record('enabled', diagnosticMetrics());
     updateStatusPanel();
     return true;
   }
 
   function disable() {
     requestedEnable = false;
+    helperWaitStarted = 0;
     if (preparing) return preparing.then(() => undefined);
     clearTimeout(state.enableTimer);
     state.enableTimer = 0;
     clearTimeout(state.autoStartTimer);
     state.autoStartTimer = 0;
-    if (!state.enabled) { reenableOptions = null; return restoring || Promise.resolve(); }
+    if (!state.enabled) {
+      reenableOptions = null;
+      if (!restoring && helperSetup.hasBackup()) return restoreSettings();
+      return restoring || Promise.resolve();
+    }
     state.enabled = false;
+    state.paused = false;
+    renderQueue.setSuspended(state.background);
+    diagnostics.record('disabled');
     renderQueue.cancel();
     clearSelfRenders();
     clearTimeout(state.applyTimer);
@@ -490,32 +628,43 @@ export function disable() { return disposeExtension(); }
     state.scrollRaf = 0;
     unbindEvents();
     restoring = (async () => {
-      try { await clearWindow(); } catch (error) { console.warn(LOG, 'release failed', error?.name); }
-      state.mounted = false; state.heights.clear();
       const ctx = getCtx();
+      let cleared = false;
+      const clearDisplay = async () => {
+        try { await clearWindow(); } catch (error) { console.warn(LOG, 'release failed', error?.name); }
+        state.mounted = false; state.heights.clear(); cleared = true;
+      };
+      // A background unload cannot wait for a manual reload after its UI is gone.
+      // Release while the current helper settings still describe its live renderer.
+      if (extensionDisposed && skipUnloadRefresh) await clearDisplay();
       let restore = state.originalTruncation;
       if (restore == null) {
-        const stored = localStorage.getItem(TRUNCATION_KEY);
+        const stored = storage.getItem(TRUNCATION_KEY);
         if (stored != null && Number.isFinite(Number(stored))) restore = Number(stored);
       }
       if (restore != null && ctx?.powerUserSettings) {
         ctx.powerUserSettings.chat_truncation = restore;
         ctx.saveSettingsDebounced?.(); state.originalTruncation = null;
-        localStorage.removeItem(TRUNCATION_KEY);
+        storage.removeItem(TRUNCATION_KEY);
       }
       if (helperSetup.hasBackup()) {
         try {
           const changed = await helperSetup.restore();
           setAutoEnabled(false);
-          if (changed) { location.reload(); return; }
+          if (changed) {
+            const navigating = requestReload('helper-restored', true);
+            if (navigating || !extensionDisposed) return;
+          }
         } catch (error) {
           state.lastRenderError = error.message;
-          recoveryAttempted = true;
           window.toastr?.warning(error.message);
+          if (!extensionDisposed) return;
         }
       }
+      if (!cleared) await clearDisplay();
       const printed = safe(() => ctx?.printMessages?.(), 'restore rendering');
       if (printed?.then) await printed;
+      if (skipUnloadRefresh) return;
       refreshAllMounted();
       try { await renderQueue.whenIdle(); } catch (error) {
         state.lastRenderError = '前端恢复未响应，窗口已关闭，请刷新酒馆恢复展示。';
@@ -529,12 +678,25 @@ export function disable() { return disposeExtension(); }
     return restoring;
   }
 
+  function restoreSettings() {
+    if (preparing) return preparing;
+    preparing = helperSetup.restore().then(changed => {
+      setAutoEnabled(false);
+      if (changed || pendingReload) requestReload('helper-restored', true);
+    }).catch(error => { state.lastRenderError = error.message; })
+      .finally(() => { preparing = null; updateStatusPanel(); });
+    return preparing;
+  }
+
   function audit() {
     const chatEl = getChatEl();
     const chat = getChat();
     return {
       version: VERSION,
       enabled: state.enabled,
+      paused: state.paused,
+      background: state.background,
+      pendingReload: !!pendingReload,
       mounted: state.mounted,
       applying: state.applying || !!restoring || !!preparing,
       chatLength: chat.length,
@@ -560,6 +722,7 @@ export function disable() { return disposeExtension(); }
     disable,
     apply,
     audit,
+    diagnostics: getDiagnostics,
     getChat,
     getMessageElement,
     get enabled() {
@@ -570,7 +733,7 @@ export function disable() { return disposeExtension(); }
   window.STDOMWindow = api;
 
   function getPreloadSize() {
-    const raw = Number(localStorage.getItem(PRELOAD_KEY));
+    const raw = Number(storage.getItem(PRELOAD_KEY));
     if (!Number.isFinite(raw) || raw < 1) return DEFAULT_PRELOAD;
     return Math.min(MAX_PRELOAD, Math.trunc(raw));
   }
@@ -581,11 +744,11 @@ export function disable() { return disposeExtension(); }
   }
 
   function isAutoEnabled() {
-    return localStorage.getItem(STORAGE_KEY) === '1';
+    return storage.getItem(STORAGE_KEY) === '1';
   }
 
   function setAutoEnabled(on) {
-    localStorage.setItem(STORAGE_KEY, on ? '1' : '0');
+    storage.setItem(STORAGE_KEY, on ? '1' : '0');
   }
 
   async function initSettingsPanel() {
@@ -608,7 +771,7 @@ export function disable() { return disposeExtension(); }
         checkbox.disabled = true;
         setAutoEnabled(on);
         try {
-          if (on && !await enable(getAutoOptions())) { checkbox.checked = false; setAutoEnabled(false); }
+          if (on && !await enable(getAutoOptions(), { interactive: true })) { checkbox.checked = false; setAutoEnabled(false); }
           else if (!on) await disable();
         } finally { checkbox.disabled = false; updateStatusPanel(); }
       });
@@ -623,13 +786,26 @@ export function disable() { return disposeExtension(); }
             ? Math.min(MAX_PRELOAD, Math.trunc(raw))
             : DEFAULT_PRELOAD;
           preloadInput.value = String(size);
-          localStorage.setItem(PRELOAD_KEY, String(size));
+          storage.setItem(PRELOAD_KEY, String(size));
           config.minWindow = size; config.maxWindow = size;
           if (state.enabled) movingWindow.resize();
           window.toastr?.info(state.enabled ? `阅读窗口已调整为 ${size} 层` : '已保存，开启窗口时直接生效');
           updateStatusPanel();
         });
       }
+      document.getElementById('dom_window_reload')?.addEventListener('click', () => requestReload(pendingReload || 'manual-recovery', true));
+      document.getElementById('dom_window_restore')?.addEventListener('click', () => { void restoreSettings(); });
+      document.getElementById('dom_window_diagnostics')?.addEventListener('click', () => {
+        const content = JSON.stringify(getDiagnostics(), null, 2);
+        const output = document.getElementById('dom_window_diagnostics_output');
+        output.value = content; output.hidden = false;
+        output.focus(); output.select();
+        // Visible selectable text also works on browsers without Clipboard API.
+        if (navigator.clipboard?.writeText) {
+          navigator.clipboard.writeText(content).then(() => window.toastr?.info('诊断信息已复制。'), () => {});
+        }
+      });
+      updateStatusPanel();
     } catch (err) {
       console.warn(LOG, 'settings panel failed', err);
     }
@@ -665,15 +841,17 @@ export function disable() { return disposeExtension(); }
     const mounted = chatEl?.querySelectorAll(':scope > .mes').length ?? 0;
     const enabled = state.enabled;
     const active = enabled && state.mounted && state.pinnedId != null && state.pinnedId >= 0;
-    const range = active ? `${state.start}–${state.pinnedId}（${mounted} 层）` : '—';
+    const range = active ? `${state.start}–${state.end}${state.end < state.pinnedId ? ' + 末楼' : ''}` : '—';
     const memory = performance.memory?.usedJSHeapSize;
     const queue = renderQueue.snapshot();
     const nodes = document.getElementsByTagName('*').length;
-    const stateText = preparing ? '正在自动适配' : !enabled ? '已关闭' : active ? '已开启' : '等待挂载';
+    const stateText = preparing ? '正在保存设置' : pendingReload ? '等待刷新' : state.paused ? '已暂停'
+      : state.enableTimer && helperWaitStarted ? '等待助手'
+      : !enabled ? '已关闭' : state.background ? '后台暂停' : active ? '已开启' : '等待挂载';
     const compatibility = document.getElementById('dom_window_compatibility');
     if (compatibility) {
       const check = helperLifecycle.inspect();
-      compatibility.textContent = !check.ok ? check.reason : helperSetup.hasBackup()
+      compatibility.textContent = !storage.persistent ? '浏览器未允许保存网站数据，窗口设置只在本次页面内保留。' : !check.ok ? check.reason : helperSetup.hasBackup()
         ? '助手已自动适配；关闭窗口后会还原原设置并刷新。' : '开启即可使用，无需另改助手设置。';
     }
 
@@ -682,31 +860,35 @@ export function disable() { return disposeExtension(); }
     document.getElementById('dom_window_state').textContent = stateText;
     statusEl.dataset.enabled = String(enabled);
     document.getElementById('dom_window_metrics').textContent =
-      `窗口 ${range} · 已加载 ${mounted}/${chat.length} 层\nDOM ${nodes} · 堆内存 ${formatMemory(memory)}` +
+      `窗口 ${range} · 已加载 ${mounted}/${chat.length} 层\n页面元素 ${nodes} · 聊天内前端 ${chatEl?.querySelectorAll('iframe').length || 0}` +
+      (Number.isFinite(memory) ? `\n脚本堆 ${formatMemory(memory)}（不含页面全部内存）` : '') +
       `\n前端恢复：运行 ${queue.running} · 等待 ${queue.pending}` +
       (state.lastRenderError ? `\n${state.lastRenderError}` : '');
 
     const badge = document.getElementById('dom_window_header_state');
-    if (badge) badge.textContent = !enabled ? '已关闭' : active ? `已开启 · ${mounted} 层` : '等待挂载';
+    if (badge) badge.textContent = state.paused || pendingReload || preparing || state.background ? stateText
+      : !enabled ? '已关闭' : active ? `已开启 · ${mounted} 层` : '等待挂载';
+    const reloadButton = document.getElementById('dom_window_reload');
+    if (reloadButton) reloadButton.hidden = !state.paused && !pendingReload;
+    const restoreButton = document.getElementById('dom_window_restore');
+    if (restoreButton) { restoreButton.hidden = state.enabled || isAutoEnabled() || !helperSetup.hasBackup(); restoreButton.disabled = !!preparing; }
   }
 
   const statusInterval = setInterval(() => {
     if (!document.hidden) updateStatusPanel();
-    // Recover this browser's interrupted shutdown using its account-scoped
-    // backup. Another browser opening the account must not undo adaptation.
-    if (!state.enabled && !isAutoEnabled() && !preparing && !restoring && !recoveryAttempted &&
-      helperSetup.hasBackup() && window.TavernHelper?.builtin?.saveSettings && !window.TavernHelper.builtin.duringGenerating?.()) {
-      recoveryAttempted = true;
-      preparing = helperSetup.restore().then(changed => { if (changed) location.reload(); })
-        .catch(error => { state.lastRenderError = error.message; })
-        .finally(() => { preparing = null; updateStatusPanel(); });
+    if (!document.hidden && Date.now() - lastCheckpoint >= 10000) {
+      lastCheckpoint = Date.now(); diagnostics.checkpoint(diagnosticMetrics());
     }
   }, 1000);
   updateStatusPanel();
 
   disposeExtension = async () => {
     extensionDisposed = true;
+    skipUnloadRefresh = state.background || state.paused || renderQueue.snapshot().running > 0;
+    if (skipUnloadRefresh) renderQueue.dispose();
     clearInterval(statusInterval);
+    pageEvents.forEach(name => window.removeEventListener(name, updateVisibility));
+    documentEvents.forEach(name => document.removeEventListener(name, updateVisibility));
     document.getElementById('dom_window_settings')?.remove();
     await disable();
     renderQueue.dispose();

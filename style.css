@@ -80,3 +80,24 @@
 #dom_window_status[data-enabled="false"] #dom_window_state {
   opacity: 0.65;
 }
+
+#dom_window_settings .dom-window-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+#dom_window_settings [hidden] { display: none !important; }
+
+#dom_window_diagnostics_output {
+  width: 100%;
+  height: 150px;
+  margin-top: 8px;
+  box-sizing: border-box;
+  resize: vertical;
+}
+
+@media (max-width: 420px) {
+  #dom_window_settings .dom-window-preload { flex-wrap: wrap; }
+}

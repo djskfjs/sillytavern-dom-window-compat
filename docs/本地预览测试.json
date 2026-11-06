@@ -1,0 +1,247 @@
+{
+  "date": "2026-11-07",
+  "build": "通用浏览器兼容-实现验收",
+  "version": "0.4.3-compat.5",
+  "testedVersionLabel": "0.4.3-compat.5",
+  "validationNote": "正式发布文件统一为0.4.3-compat.5，并给入口、CSS与内部模块引用加版本参数后，已重新通过34项单元、22项Chrome通用、10项滚动、10项Chrome安全与10项桌面WebKit安全检查。桌面引擎与合成助手结果不能代替iPhone真机验证。",
+  "unitTestsPassed": 34,
+  "suites": [
+    {
+      "name": "Chrome 通用回归",
+      "passed": 22,
+      "cases": [
+        {
+          "name": "模型复现助手强引用残留及目标回收",
+          "passed": true
+        },
+        {
+          "name": "清理事件批量创建前端后，队列复用已有iframe",
+          "passed": true
+        },
+        {
+          "name": "助手DOM替换监听已生效，正常窗口移动不重复替换楼层",
+          "passed": true
+        },
+        {
+          "name": "modern API：5层上下阅读和关闭恢复",
+          "passed": true
+        },
+        {
+          "name": "legacy API：5层上下阅读和关闭恢复",
+          "passed": true
+        },
+        {
+          "name": "设置10层：10个前端全部完成",
+          "passed": true
+        },
+        {
+          "name": "单次跨上下巨大占位后停手：非空视口且10层恢复",
+          "passed": true
+        },
+        {
+          "name": "慢前端和快速反向：旧任务不滞留",
+          "passed": true
+        },
+        {
+          "name": "12000px末楼不会错误拉动历史窗口",
+          "passed": true
+        },
+        {
+          "name": "异步回收期间继续滑动：最终手势接管位置",
+          "passed": true
+        },
+        {
+          "name": "历史阅读时追加消息：区间和重叠实例保留",
+          "passed": true
+        },
+        {
+          "name": "相邻窗口复用重叠iframe",
+          "passed": true
+        },
+        {
+          "name": "120轮跨历史滚动：后台最多11个实例，无脱离DOM引用",
+          "passed": true
+        },
+        {
+          "name": "恢复时切换聊天：无旧前端污染",
+          "passed": true
+        },
+        {
+          "name": "底部追加：最近10层继续移动",
+          "passed": true
+        },
+        {
+          "name": "单个恢复失败后继续其他楼层",
+          "passed": true
+        },
+        {
+          "name": "挂载异常后暂停并保留末楼，不批量恢复",
+          "passed": true
+        },
+        {
+          "name": "旧开关不自动继承，重复加载保护",
+          "passed": true
+        },
+        {
+          "name": "扩展卸载与重新加载",
+          "passed": true
+        },
+        {
+          "name": "未知助手版本拒绝启动，避免半成品回收",
+          "passed": true
+        },
+        {
+          "name": "同步查找旧楼层时移动完整窗口",
+          "passed": true
+        },
+        {
+          "name": "挂起恢复取消后仍有超时守护，不启动第二个恢复调用",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "name": "Chrome 滚动回归",
+      "passed": 10,
+      "cases": [
+        {
+          "name": "No scroll write for a resize below the reader",
+          "passed": true
+        },
+        {
+          "name": "Continuous scrolling cannot starve visible frontend recovery",
+          "passed": true
+        },
+        {
+          "name": "Slow helper cleanup keeps the overlapping row stationary",
+          "passed": true
+        },
+        {
+          "name": "Native scroll anchoring is disabled only while the window is enabled",
+          "passed": true
+        },
+        {
+          "name": "Long hidden source does not become a giant blank row",
+          "passed": true
+        },
+        {
+          "name": "Small upward wheel gestures keep making progress",
+          "passed": true
+        },
+        {
+          "name": "Changing 10 to 15 to 5 floors preserves the reader without reload",
+          "passed": true
+        },
+        {
+          "name": "One activation adapts both helper settings and closing restores them",
+          "passed": true
+        },
+        {
+          "name": "Interrupted shutdown waits for explicit restoration without an automatic reload",
+          "passed": true
+        },
+        {
+          "name": "Missing randomUUID and changing capacity while closed require no reload",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "name": "Chrome 兼容安全",
+      "passed": 10,
+      "cases": [
+        {
+          "name": "blocked browser storage keeps initialization usable and does not orphan helper backups",
+          "passed": true
+        },
+        {
+          "name": "extension unload restores ordinary rows with a suspended frontend and already compatible helper",
+          "passed": true
+        },
+        {
+          "name": "extension unload restores ordinary rows with a suspended frontend and adapted helper",
+          "passed": true
+        },
+        {
+          "name": "hidden page pauses pending work and resumes the requested reading position",
+          "passed": true
+        },
+        {
+          "name": "diagnostic data omits chat, credentials and page URL, including display output",
+          "passed": true
+        },
+        {
+          "name": "manual reload is blocked during generation and works after it finishes",
+          "passed": true
+        },
+        {
+          "name": "mount failure pauses without automatic restoration or navigation",
+          "passed": true
+        },
+        {
+          "name": "15-second stall preserves page and already compatible helper settings",
+          "passed": true
+        },
+        {
+          "name": "background time does not consume an active frontend timeout or cause a second call",
+          "passed": true
+        },
+        {
+          "name": "15-second stall preserves page and adapted helper settings",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "name": "桌面 WebKit 兼容安全",
+      "passed": 10,
+      "cases": [
+        {
+          "name": "extension unload restores ordinary rows with a suspended frontend and already compatible helper",
+          "passed": true
+        },
+        {
+          "name": "blocked browser storage keeps initialization usable and does not orphan helper backups",
+          "passed": true
+        },
+        {
+          "name": "diagnostic data omits chat, credentials and page URL, including display output",
+          "passed": true
+        },
+        {
+          "name": "extension unload restores ordinary rows with a suspended frontend and adapted helper",
+          "passed": true
+        },
+        {
+          "name": "hidden page pauses pending work and resumes the requested reading position",
+          "passed": true
+        },
+        {
+          "name": "manual reload is blocked during generation and works after it finishes",
+          "passed": true
+        },
+        {
+          "name": "mount failure pauses without automatic restoration or navigation",
+          "passed": true
+        },
+        {
+          "name": "15-second stall preserves page and already compatible helper settings",
+          "passed": true
+        },
+        {
+          "name": "background time does not consume an active frontend timeout or cause a second call",
+          "passed": true
+        },
+        {
+          "name": "15-second stall preserves page and adapted helper settings",
+          "passed": true
+        }
+      ]
+    }
+  ],
+  "limitations": [
+    "桌面引擎与合成助手；不是 iPhone 真机或实际内存压力测试",
+    "Firefox 执行器未取得有效结果",
+    "可选历史版本对照未提供源码，未运行"
+  ]
+}

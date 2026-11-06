@@ -8,15 +8,25 @@
  */
 export function createHelperLifecycle({ getRoot, getHelper, getContext }) {
   function inspect() {
+    const ctx = getContext();
+    const render = ctx?.extensionSettings?.tavern_helper?.render;
     const helper = getHelper();
-    if (!helper) return { ok: true, version: null, reason: '纯文字窗口' };
+    if (!helper) {
+      // Settings can arrive before Helper has finished loading its public API.
+      // Treating that gap as text-only would remove message DOM without
+      // releasing the Helper runtimes which are about to attach to it.
+      if (render && render.enabled !== false) {
+        return { ok: false, pending: true, version: null, reason: '正在等待酒馆助手启动…' };
+      }
+      return { ok: true, version: null, reason: '纯文字窗口' };
+    }
     let version;
     try { version = helper.getTavernHelperVersion?.(); } catch {}
     if (version !== '4.12.0') return { ok: false, version,
       reason: `检测到酒馆助手 ${typeof version === 'string' && version ? version : '版本未读到'}；当前已适配 4.12.0。未修改助手设置。` };
-    const ctx = getContext();
-    const render = ctx?.extensionSettings?.tavern_helper?.render;
     if (typeof ctx?.eventSource?.emit !== 'function') return { ok: false, version, reason: '未找到前端回收所需的酒馆事件接口。' };
+    if (typeof helper.refreshOneMessage !== 'function') return { ok: false, version,
+      reason: '未找到酒馆助手的前端恢复接口，已保留原聊天显示。' };
     if (!render) return { ok: false, version, reason: '无法读取酒馆助手渲染设置，请保持窗口关闭。' };
     const adjustments = [];
     if (render.depth !== 0) adjustments.push('渲染深度设为 0');

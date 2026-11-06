@@ -14,7 +14,10 @@ export function createRenderQueue({ getRoot, getChat, refresh, markSelfRender,
   let active = null;
   let timer = 0;
   let stallTimer = 0;
+  let stallRemaining = 0;
+  let stallStartedAt = 0;
   let stalled = false;
+  let suspended = false;
   let disposed = false;
   let scrollSettledAt = 0;
   let completed = 0;
@@ -96,12 +99,25 @@ export function createRenderQueue({ getRoot, getChat, refresh, markSelfRender,
     return removed;
   }
 
-  function armStallTimer(item) {
+  function pauseStallTimer() {
+    if (stallTimer) {
+      stallRemaining = Math.max(0, stallRemaining - (performance.now() - stallStartedAt));
+    }
     clearTimeout(stallTimer);
-    if (!Number.isFinite(stallMs) || stallMs <= 0) return;
+    stallTimer = 0;
+    stallStartedAt = 0;
+  }
+
+  function armStallTimer(item, reset = false) {
+    pauseStallTimer();
+    if (reset) stallRemaining = stallMs;
+    if (disposed || suspended || stalled || active !== item || !Number.isFinite(stallMs) || stallMs <= 0) return;
+    stallStartedAt = performance.now();
     stallTimer = setTimeout(() => {
       stallTimer = 0;
-      if (disposed || active !== item) return;
+      stallStartedAt = 0;
+      stallRemaining = 0;
+      if (disposed || suspended || active !== item) return;
       stalled = true; item.invalidated = true;
       clearPending(); clearWaiting(item); clearTimeout(timer); timer = 0; errors++;
       const error = new Error('Frontend refresh did not finish within the allowed time');
@@ -112,11 +128,11 @@ export function createRenderQueue({ getRoot, getChat, refresh, markSelfRender,
       try { onStall(item.id, error); } catch (callbackError) {
         console.warn('[DOMWindow]', 'stall callback failed', callbackError);
       }
-    }, stallMs);
+    }, stallRemaining);
   }
 
   function schedule(delay = 0) {
-    if (disposed || active || stalled || !pending.size) {
+    if (disposed || suspended || active || stalled || !pending.size) {
       clearTimeout(timer); timer = 0; notifyIdle(); return;
     }
     clearTimeout(timer);
@@ -127,7 +143,7 @@ export function createRenderQueue({ getRoot, getChat, refresh, markSelfRender,
 
   async function pump() {
     timer = 0;
-    if (disposed || active || stalled) return;
+    if (disposed || suspended || active || stalled) return;
     const now = performance.now();
     if (now < scrollSettledAt && ![...pending.values()].some(item => now >= item.queuedAt + maxWaitMs)) { schedule(); return; }
     let next;
@@ -151,7 +167,7 @@ export function createRenderQueue({ getRoot, getChat, refresh, markSelfRender,
     try {
       anchor = beforeRefresh(next);
       markSelfRender(next.id);
-      armStallTimer(next);
+      armStallTimer(next, true);
       await refresh(next.id, next.element);
       if (valid(next)) {
         completed++;
@@ -169,7 +185,7 @@ export function createRenderQueue({ getRoot, getChat, refresh, markSelfRender,
         }
       }
     } finally {
-      clearTimeout(stallTimer); stallTimer = 0;
+      clearTimeout(stallTimer); stallTimer = 0; stallStartedAt = 0; stallRemaining = 0;
       clearWaiting(next);
       active = null;
       stalled = false;
@@ -205,20 +221,34 @@ export function createRenderQueue({ getRoot, getChat, refresh, markSelfRender,
     },
     prune,
     discard,
+    setSuspended(value) {
+      if (disposed || suspended === !!value) return;
+      suspended = !!value;
+      if (suspended) {
+        clearTimeout(timer); timer = 0;
+        // Browser background time must not consume the foreground recovery
+        // budget. Keep the in-flight promise; another refresh cannot overlap it.
+        pauseStallTimer();
+      } else {
+        if (active) armStallTimer(active);
+        schedule();
+      }
+    },
     cancel() {
       generation++;
       clearPending();
       if (active) clearWaiting(active);
       clearTimeout(timer);
       timer = 0;
-      if (!active) { clearTimeout(stallTimer); stallTimer = 0; stalled = false; }
+      if (!active) { clearTimeout(stallTimer); stallTimer = 0; stallStartedAt = 0; stallRemaining = 0; stalled = false; }
       scrollSettledAt = 0;
       notifyIdle();
     },
     isRendering(id) { return active?.id === Number(id) && valid(active); },
     snapshot() { return { pending: pending.size, ready: [...pending.values()].filter(item => valid(item) && Number.isFinite(priority(item))).length,
-      running: active ? 1 : 0, completed, discarded, errors, stalled }; },
+      running: active ? 1 : 0, completed, discarded, errors, stalled, suspended }; },
     whenIdle() {
+      if (disposed) { const error = new Error('Frontend queue disposed'); error.name = 'AbortError'; return Promise.reject(error); }
       if (stalled) { const error = new Error('Frontend refresh stalled; reload is required'); error.name = 'TimeoutError'; return Promise.reject(error); }
       if (!active && !pending.size) return Promise.resolve();
       return new Promise((resolve, reject) => waiters.add({ resolve, reject }));
@@ -226,7 +256,10 @@ export function createRenderQueue({ getRoot, getChat, refresh, markSelfRender,
     dispose() {
       this.cancel();
       disposed = true;
-      clearTimeout(stallTimer); stallTimer = 0;
+      clearTimeout(stallTimer); stallTimer = 0; stallStartedAt = 0; stallRemaining = 0;
+      const error = new Error('Frontend queue disposed'); error.name = 'AbortError';
+      for (const waiter of waiters) waiter.reject(error);
+      waiters.clear();
     },
   };
 }

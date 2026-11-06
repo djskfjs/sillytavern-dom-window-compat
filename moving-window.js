@@ -1,4 +1,4 @@
-import { hasFrontendCandidate } from './render-queue.js';
+import { hasFrontendCandidate } from './render-queue.js?v=0.4.3-compat.5';
 
 /** Continuous reading window; chat data and saved message IDs are untouched. */
 export function createMovingWindow({ state, config, getRoot, getChat, mountMessage,
@@ -18,6 +18,7 @@ export function createMovingWindow({ state, config, getRoot, getChat, mountMessa
   const transitionSlots = new Set();
   const settledDuringTransition = new Set();
   const root = () => getRoot();
+  const running = () => state.enabled && !state.paused && !state.background;
   const rows = () => [...(root()?.querySelectorAll(':scope > .mes') || [])];
   const size = () => Math.min(getChat().length, Math.max(1, Math.trunc(Number(config.minWindow) || 5)));
   const idOf = element => Number(element.getAttribute('mesid'));
@@ -111,7 +112,7 @@ export function createMovingWindow({ state, config, getRoot, getChat, mountMessa
   }
   function afterRefresh(item, anchor) {
     if (!state.enabled) return;
-    if (changing) { settledDuringTransition.add(item.element); return; }
+    if (changing || !running()) { settledDuringTransition.add(item.element); return; }
     anchor = layoutAnchor?.revision === state.scrollRevision ? layoutAnchor : anchor;
     releaseHeight(item.element);
     measure(); layout(); restoreAnchor(anchor);
@@ -121,7 +122,7 @@ export function createMovingWindow({ state, config, getRoot, getChat, mountMessa
   function observeRows() {
     if (!observer && typeof ResizeObserver === 'function') {
       observer = new ResizeObserver(() => {
-        if (!state.enabled || changing || !state.mounted) return;
+        if (!running() || changing || !state.mounted) return;
         if (!measure()) return;
         layout(); restoreAnchor(layoutAnchor); layoutAnchor = captureAnchor();
       });
@@ -202,6 +203,8 @@ export function createMovingWindow({ state, config, getRoot, getChat, mountMessa
   async function changeRange(next) {
     const chat = root(), data = getChat(), epoch = generation;
     if (!chat || !data.length) return;
+    const compatibility = lifecycle.inspect?.();
+    if (compatibility && !compatibility.ok) throw new Error('Helper lifecycle is unavailable');
     transitionGeometry = captureGeometry();
     changing = true; state.applying = true;
     try {
@@ -231,7 +234,8 @@ export function createMovingWindow({ state, config, getRoot, getChat, mountMessa
         let element = elementOf(id);
         if (!element) {
           const following = rows().find(el => idOf(el) > id);
-          const previous = rows().filter(el => idOf(el) < id).at(-1);
+        const preceding = rows().filter(el => idOf(el) < id);
+        const previous = preceding[preceding.length - 1];
           const result = mountMessage(id, following ? { beforeId: idOf(following) }
             : previous ? { afterId: idOf(previous) } : {});
           element = result?.el;
@@ -252,7 +256,8 @@ export function createMovingWindow({ state, config, getRoot, getChat, mountMessa
       measure(); layout();
       transitionSlots.forEach(slot => slot.remove()); transitionSlots.clear();
       const anchor = next.anchor;
-      if (anchor?.revision === state.scrollRevision && anchor.atBottom) scrollTo(chat.scrollHeight);
+      if (!running()) { /* Leave background scroll position untouched. */ }
+      else if (anchor?.revision === state.scrollRevision && anchor.atBottom) scrollTo(chat.scrollHeight);
       else if (anchor?.revision === state.scrollRevision && anchor.element?.isConnected) scrollTo(chat.scrollTop + anchor.element.getBoundingClientRect().top - anchor.top);
       else if (anchor?.revision === state.scrollRevision && Number.isFinite(anchor.fraction)) {
         const element = elementOf(anchor.id);
@@ -271,7 +276,7 @@ export function createMovingWindow({ state, config, getRoot, getChat, mountMessa
       if (settledDuringTransition.size) {
         const anchor = captureAnchor();
         settledDuringTransition.forEach(releaseHeight); settledDuringTransition.clear();
-        if (state.enabled && state.mounted) {
+        if (running() && state.mounted) {
           measure(); layout(); restoreAnchor(anchor); layoutAnchor = captureAnchor();
         }
       }
@@ -279,13 +284,13 @@ export function createMovingWindow({ state, config, getRoot, getChat, mountMessa
   }
   async function drain() {
     if (changing) return;
-    while (target && state.enabled) {
+    while (target && running()) {
       const next = target; target = null;
       try { await changeRange(next); } catch (error) { target = null; onFailure(error); break; }
     }
   }
   function requestRange(range, anchor) {
-    if (renderQueue.snapshot().stalled) return;
+    if (!running() || renderQueue.snapshot().stalled) return;
     if (!changing && range.start === state.start && range.end === state.end && matches()) return;
     target = { ...range, anchor: { ...anchor, revision: state.scrollRevision } };
     void drain();
@@ -298,7 +303,7 @@ export function createMovingWindow({ state, config, getRoot, getChat, mountMessa
       Array.from({ length: state.end - state.start + 1 }, (_, n) => state.start + n).every(id => elementOf(id));
   }
   function apply(force = false) {
-    if (!state.enabled || !getChat().length || (!force && matches())) return false;
+    if (!running() || !getChat().length || (!force && matches())) return false;
     generation++; target = null;
     if (!originalScrollAnchor) {
       const element = root();
@@ -312,21 +317,21 @@ export function createMovingWindow({ state, config, getRoot, getChat, mountMessa
     return true;
   }
   function syncTail() {
-    if (!state.mounted || state.pinnedId >= getChat().length - 1) return false;
+    if (!running() || !state.mounted || state.pinnedId >= getChat().length - 1) return false;
     const anchor = layoutAnchor || captureAnchor();
     requestRange(anchor?.atBottom ? desiredRange(getChat().length - 1, true)
       : { start: state.start, end: state.end }, anchor);
     return true;
   }
   function resize() {
-    if (!state.enabled || !state.mounted || !getChat().length) return false;
+    if (!running() || !state.mounted || !getChat().length) return false;
     const position = changing ? positionDuringTransition() : readPosition();
     const atBottom = root().scrollHeight - root().scrollTop - root().clientHeight < 40;
     requestRange(desiredRange(position?.id ?? state.end, atBottom), { ...(position || captureAnchor()), atBottom });
     return true;
   }
   function onScroll() {
-    if (!state.enabled) return;
+    if (!running()) return;
     if (correction !== null && Math.abs(root().scrollTop - correction) < 1) { correction = null; return; }
     correction = null; state.scrollRevision++;
     const direction = Math.sign(root().scrollTop - lastScrollTop);
@@ -340,7 +345,7 @@ export function createMovingWindow({ state, config, getRoot, getChat, mountMessa
     if (state.scrollRaf) return;
     state.scrollRaf = requestAnimationFrame(() => {
       state.scrollRaf = 0;
-      if (!state.enabled || !state.mounted) return;
+      if (!running() || !state.mounted) return;
       const position = readPosition();
       if (!position) return;
       layoutAnchor = captureAnchor();
@@ -389,12 +394,15 @@ export function createMovingWindow({ state, config, getRoot, getChat, mountMessa
   function getMessageElement(id) {
     const existing = elementOf(id);
     if (existing) return existing;
-    if (state.enabled && !renderQueue.snapshot().stalled && Number.isInteger(id) && id >= 0 && id < getChat().length) {
+    if (running() && !renderQueue.snapshot().stalled && Number.isInteger(id) && id >= 0 && id < getChat().length) {
+      const compatibility = lifecycle.inspect?.();
+      if (compatibility && !compatibility.ok) { onFailure(new Error('Helper lifecycle is unavailable')); return null; }
       // Preserve the synchronous lookup contract. The complete range follows
       // through the same bounded transition; only this requested node is added
       // before the asynchronous helper cleanup finishes.
       const following = rows().find(el => idOf(el) > id);
-      const previous = rows().filter(el => idOf(el) < id).at(-1);
+      const preceding = rows().filter(el => idOf(el) < id);
+      const previous = preceding[preceding.length - 1];
       const result = mountMessage(id, following ? { beforeId: idOf(following) }
         : previous ? { afterId: idOf(previous) } : {});
       if (result?.el) references.set(result.el, getChat()[id]);
@@ -403,7 +411,21 @@ export function createMovingWindow({ state, config, getRoot, getChat, mountMessa
     }
     return null;
   }
+  function suspend() {
+    target = null; observer?.disconnect(); layoutAnchor = null;
+    for (const element of reservations.keys()) {
+      releaseHeight(element); element.classList.remove('dom-window-render-pending');
+    }
+    settledDuringTransition.clear();
+  }
+  function resume() {
+    if (!running()) return;
+    settledDuringTransition.forEach(releaseHeight); settledDuringTransition.clear();
+    measure(); layout(); layoutAnchor = captureAnchor(); observeRows();
+    if (target) void drain();
+    else if (matches()) onScroll();
+  }
   return { apply, syncTail, resize, onScroll, getMessageElement, clear, matches, measure, layout,
-    captureAnchor, afterRefresh, size,
-    integrity: () => { if (!changing && !matches()) requestRange({ start: state.start, end: state.end }, captureAnchor()); } };
+    captureAnchor, afterRefresh, size, suspend, resume,
+    integrity: () => { if (running() && !changing && !matches()) requestRange({ start: state.start, end: state.end }, captureAnchor()); } };
 }

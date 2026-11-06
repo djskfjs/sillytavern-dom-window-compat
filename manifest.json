@@ -3,11 +3,11 @@
   "loading_order": 5,
   "requires": [],
   "optional": [],
-  "js": "index.js",
-  "css": "style.css",
+  "js": "index.js?v=0.4.3-compat.5",
+  "css": "style.css?v=0.4.3-compat.5",
   "author": "Moyu Workshop",
   "homePage": "https://github.com/djskfjs/sillytavern-dom-window-compat",
-  "version": "0.4.3-compat.4",
+  "version": "0.4.3-compat.5",
   "auto_update": false,
   "minimum_client_version": "1.14.0"
 }
