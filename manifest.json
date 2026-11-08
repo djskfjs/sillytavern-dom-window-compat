@@ -4,7 +4,7 @@
   "requires": [],
   "optional": [],
   "js": "index.js?v=0.4.3-compat.6",
-  "css": "style.css?v=0.4.3-compat.6",
+  "css": "style.css?v=0.4.3-compat.6&rev=20261108-ui",
   "author": "Moyu Workshop",
   "homePage": "https://github.com/djskfjs/sillytavern-dom-window-compat",
   "version": "0.4.3-compat.6",

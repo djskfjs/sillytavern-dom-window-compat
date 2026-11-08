@@ -84,8 +84,18 @@
 #dom_window_settings .dom-window-actions {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
   margin-top: 10px;
+}
+
+#dom_window_settings .dom-window-actions .menu_button {
+  width: auto;
+  min-width: max-content;
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 6px 10px;
+  white-space: nowrap;
 }
 
 #dom_window_settings [hidden] { display: none !important; }

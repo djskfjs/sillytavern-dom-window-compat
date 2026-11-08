@@ -29,8 +29,9 @@
                 <button type="button" id="dom_window_diagnostics" class="menu_button">复制诊断信息</button>
             </div>
             <textarea id="dom_window_diagnostics_output" class="text_pole" aria-label="诊断信息，可全选复制" readonly hidden></textarea>
-            <small class="dom-window-compat-note">0.4.3-compat.6 · 通用浏览器兼容。后台暂停恢复，异常保留页面；暂停后不再限制新增楼层，可在方便时手动刷新。诊断仅含浏览器版本、运行状态和数量，不含聊天内容、网址或密钥。</small>
-            <small class="dom-window-compat-note">助手前端回收已适配 4.12.0；其他版本会显示原因并保留原聊天。减少楼层可以减轻负担，但无法保证阻止系统回收网页。</small>
+            <small class="dom-window-compat-note">版本 0.4.3-compat.6。生成回复或切到其他应用时，会先暂停加载更多历史消息；回复结束或回到酒馆后继续。遇到问题时会保留当前页面，不会自动刷新。</small>
+            <small class="dom-window-compat-note">如果页面白屏或自动重新加载，等酒馆重新打开后，点“复制诊断信息”，把内容发给帮你排查问题的人。里面没有聊天正文、网址或 API 密钥。</small>
+            <small class="dom-window-compat-note">目前支持酒馆助手 4.12.0，其他版本暂时不能开启此功能。“阅读窗口楼层”设得越少，手机负担越小；但复杂的角色卡仍可能让页面卡住或重新加载。</small>
         </div>
     </div>
 </div>
