@@ -1,5 +1,5 @@
 /**
- * DOM Window 0.4.3-compat.6 — browser compatibility build
+ * DOM Window 0.4.3-compat.7 — browser compatibility build
  *
  * 只窗口化 ST 的消息 DOM，不改 chat 数据。
  * - chat 数组保持完整，AI 上下文、存档、消息 ID 不变。
@@ -11,11 +11,11 @@
  * - STDOMWindow.getChat() 返回完整 chat
  * - STDOMWindow.getMessageElement(mesid) 按需挂载某一层
  */
-import { createRenderQueue } from './render-queue.js?v=0.4.3-compat.6';
-import { createMovingWindow } from './moving-window.js?v=0.4.3-compat.6';
-import { createHelperLifecycle } from './helper-lifecycle.js?v=0.4.3-compat.6';
-import { createHelperSetup } from './helper-setup.js?v=0.4.3-compat.6';
-import { createBrowserStorage, createDiagnostics } from './runtime-support.js?v=0.4.3-compat.6';
+import { createRenderQueue } from './render-queue.js?v=0.4.3-compat.7';
+import { createMovingWindow } from './moving-window.js?v=0.4.3-compat.7';
+import { createHelperLifecycle } from './helper-lifecycle.js?v=0.4.3-compat.7';
+import { createHelperSetup } from './helper-setup.js?v=0.4.3-compat.7';
+import { createBrowserStorage, createDiagnostics, createDiagnosticId, getDiagnosticPageId, copyDiagnosticText, selectDiagnosticText } from './runtime-support.js?v=0.4.3-compat.7';
 
 let disposeExtension = () => {};
 export function disable() { return disposeExtension(); }
@@ -23,7 +23,8 @@ export function disable() { return disposeExtension(); }
 (() => {
   'use strict';
 
-  const VERSION = '0.4.3-compat.6';
+  const VERSION = '0.4.3-compat.7';
+  const BUILD = '重载记录留存';
   const LOG = '[DOMWindow]';
   let extensionDisposed = false;
   let restoring = null;
@@ -50,8 +51,11 @@ export function disable() { return disposeExtension(); }
   const DEFAULT_PRELOAD = 5;
   const MAX_PRELOAD = 100;
   const storage = createBrowserStorage(() => window.localStorage);
-  const diagnostics = createDiagnostics({ storage: createBrowserStorage(() => window.sessionStorage), version: VERSION });
-  diagnostics.record('load');
+  const diagnosticStorage = createBrowserStorage(() => window.sessionStorage);
+  const diagnosticBackupStorage = createBrowserStorage(() => window.localStorage);
+  const diagnostics = createDiagnostics({ storage: diagnosticStorage, backupStorage: diagnosticBackupStorage,
+    version: VERSION, build: BUILD, pageId: getDiagnosticPageId() });
+  diagnostics.record(diagnostics.resumed ? 'extension-reloaded' : 'load');
   const FALLBACK_EVENTS = {
     APP_READY: 'app_ready',
     CHAT_CHANGED: 'chat_id_changed',
@@ -275,24 +279,94 @@ export function disable() { return disposeExtension(); }
   }
 
   function diagnosticMetrics() {
-    const root = getChatEl(), queue = renderQueue.snapshot();
+    const ctx = getCtx(), root = document.querySelector('#chat'), queue = renderQueue.snapshot();
+    const frames = [...document.querySelectorAll('iframe')];
+    const framesInChat = frames.filter(frame => root?.contains(frame)).length;
+    const helperScriptFrames = frames.filter(frame => frame.id.startsWith('TH-script--')).length;
+    const helperMessageFrames = frames.filter(frame => frame.id.startsWith('TH-message--')).length;
     return { enabled: state.enabled, paused: state.paused, background: state.background, generating: state.generating,
-      chatLength: getChat().length, messagesInDom: root?.querySelectorAll(':scope > .mes').length || 0,
-      framesInChat: root?.querySelectorAll('iframe').length || 0,
-      framesInPage: document.querySelectorAll('iframe').length,
+      contextAvailable: !!ctx, chatRootConnected: !!root?.isConnected,
+      chatLength: ctx?.chat?.length || 0, messagesInDom: root?.querySelectorAll(':scope > .mes').length || 0,
+      framesInChat, framesInPage: frames.length, framesOutsideChat: frames.length - framesInChat,
+      helperScriptFrames, helperMessageFrames, otherFrames: frames.length - helperScriptFrames - helperMessageFrames,
       running: queue.running, pending: queue.pending, stalled: queue.stalled };
   }
 
   function getDiagnostics() {
     diagnostics.checkpoint(diagnosticMetrics());
     const check = helperLifecycle.inspect();
-    return { format: 1, version: VERSION, build: '生成期间暂停前端回收',
-      browser: navigator.userAgent, storageAvailable: storage.persistent,
+    return { format: 3, reportId: createDiagnosticId(), generatedAt: Date.now(), recovery: diagnostics.recovery(),
+      version: VERSION, build: BUILD,
+      browser: navigator.userAgent, storageAvailable: storage.persistent && diagnosticStorage.persistent,
+      settingsStorageAvailable: storage.persistent, diagnosticStorageAvailable: diagnosticStorage.persistent,
+      diagnosticBackupAvailable: diagnosticBackupStorage.persistent,
       helperVersion: typeof check.version === 'string' && /^[\w.+-]{1,40}$/.test(check.version) ? check.version : null,
       helperCompatible: check.ok, windowSize: config.minWindow,
       navigation: performance.getEntriesByType?.('navigation')?.[0]?.type || 'unknown',
       ...diagnostics.snapshot() };
   }
+
+  // Observe preset changes even with the reading window disabled or no chat
+  // open. Never retain event payloads: they contain names, prompts and settings.
+  let diagnosticSource = null;
+  const diagnosticListeners = [];
+  const presetTimers = new Set();
+  function clearPresetSamples() {
+    presetTimers.forEach(timer => clearTimeout(timer)); presetTimers.clear();
+  }
+  function recordPreset(code) {
+    if (extensionDisposed) return;
+    diagnostics.record(code, diagnosticMetrics());
+    if (code === 'preset-selected' || code === 'preset-before') clearPresetSamples();
+    if (code !== 'preset-after' && code !== 'preset-complete') return;
+    clearPresetSamples();
+    // A few bounded samples catch asynchronous script replacement. No page-wide
+    // MutationObserver or permanent high-frequency polling is needed.
+    for (const delay of [0, 250, 1000, 3000]) {
+      const timer = setTimeout(() => {
+        presetTimers.delete(timer);
+        if (!extensionDisposed) diagnostics.record(delay === 3000 ? 'preset-settled' : 'preset-sample', diagnosticMetrics());
+      }, delay);
+      presetTimers.add(timer);
+    }
+  }
+  function unbindDiagnosticEvents() {
+    for (const { event, handler } of diagnosticListeners) {
+      if (typeof diagnosticSource?.removeListener === 'function') diagnosticSource.removeListener(event, handler);
+      else diagnosticSource?.off?.(event, handler);
+    }
+    diagnosticListeners.length = 0; diagnosticSource = null;
+  }
+  function bindDiagnosticEvents() {
+    const ctx = getCtx(), source = ctx?.eventSource || window.eventSource;
+    if (!source?.on || diagnosticSource === source) return;
+    unbindDiagnosticEvents(); diagnosticSource = source;
+    const types = ctx?.event_types || ctx?.eventTypes || {};
+    for (const [key, fallback, code] of [
+      ['OAI_PRESET_CHANGED_BEFORE', 'oai_preset_changed_before', 'preset-before'],
+      ['OAI_PRESET_CHANGED_AFTER', 'oai_preset_changed_after', 'preset-after'],
+      ['PRESET_CHANGED', 'preset_changed', 'preset-complete'],
+      ['CHAT_CHANGED', FALLBACK_EVENTS.CHAT_CHANGED, 'chat-changed'],
+    ]) {
+      const event = types[key] || fallback;
+      const handler = () => safe(() => code === 'chat-changed'
+        ? diagnostics.record(code, diagnosticMetrics()) : recordPreset(code), 'diagnostic-event');
+      source.on(event, handler); diagnosticListeners.push({ event, handler });
+    }
+  }
+  function presetSelected(event) {
+    if (event.target?.id === 'settings_preset_openai') safe(() => recordPreset('preset-selected'), 'preset-selected');
+  }
+  let lastPageError = 0;
+  function recordPageError(event) {
+    if (Date.now() - lastPageError < 1000) return;
+    lastPageError = Date.now();
+    safe(() => diagnostics.record(event.type === 'unhandledrejection' ? 'unhandled-rejection' : 'page-error', diagnosticMetrics()), 'page-error');
+  }
+  document.addEventListener('change', presetSelected, true);
+  window.addEventListener('error', recordPageError);
+  window.addEventListener('unhandledrejection', recordPageError);
+  bindDiagnosticEvents();
 
   function requestReload(reason, interactive = false) {
     const generating = state.generating || nativeGenerating();
@@ -319,7 +393,7 @@ export function disable() { return disposeExtension(); }
     state.background = document.hidden || pageAway || frozen;
     renderQueue.setSuspended(state.background || state.paused || state.generating);
     diagnostics.record(event.type === 'visibilitychange' ? (state.background ? 'hidden' : 'visible') : event.type,
-      { background: state.background, persisted: !!event.persisted });
+      { ...diagnosticMetrics(), persisted: !!event.persisted });
     if (state.background) {
       clearTimeout(state.applyTimer); state.applyTimer = 0;
       if (state.scrollRaf) cancelAnimationFrame(state.scrollRaf);
@@ -875,14 +949,40 @@ export function disable() { return disposeExtension(); }
       }
       document.getElementById('dom_window_reload')?.addEventListener('click', () => requestReload(pendingReload || 'manual-recovery', true));
       document.getElementById('dom_window_restore')?.addEventListener('click', () => { void restoreSettings(); });
-      document.getElementById('dom_window_diagnostics')?.addEventListener('click', () => {
+      const diagnosticButton = document.getElementById('dom_window_diagnostics');
+      const diagnosticOutput = document.getElementById('dom_window_diagnostics_output');
+      const diagnosticFeedback = document.getElementById('dom_window_diagnostics_feedback');
+      diagnosticButton?.addEventListener('click', async () => {
         const content = JSON.stringify(getDiagnostics(), null, 2);
-        const output = document.getElementById('dom_window_diagnostics_output');
-        output.value = content; output.hidden = false;
-        output.focus(); output.select();
-        // Visible selectable text also works on browsers without Clipboard API.
-        if (navigator.clipboard?.writeText) {
-          navigator.clipboard.writeText(content).then(() => window.toastr?.info('诊断信息已复制。'), () => {});
+        updateDiagnosticSummary();
+        diagnosticOutput.value = content; diagnosticOutput.hidden = false;
+        document.getElementById('dom_window_diagnostics_tools').hidden = false;
+        diagnosticFeedback.hidden = false; diagnosticFeedback.textContent = '正在复制…';
+        diagnosticButton.disabled = true;
+        try {
+          const copied = await copyDiagnosticText(diagnosticOutput);
+          diagnosticFeedback.textContent = copied ? '诊断信息已复制，可以直接粘贴。'
+            : '浏览器未允许自动复制。点“全选文本”后长按文字，选择“复制”；也可以下载诊断文件。';
+        } finally { diagnosticButton.disabled = false; }
+      });
+      document.getElementById('dom_window_diagnostics_select')?.addEventListener('click', () => {
+        const selected = selectDiagnosticText(diagnosticOutput);
+        diagnosticFeedback.textContent = selected ? '已选中文本。长按文字选择“复制”，或使用系统复制快捷键。'
+          : '浏览器未能全选。请长按下方文字手动选择，或下载诊断文件。';
+      });
+      document.getElementById('dom_window_diagnostics_download')?.addEventListener('click', () => {
+        // Save the report already shown, keeping copy and download identical.
+        let url, link;
+        try {
+          url = URL.createObjectURL(new Blob([diagnosticOutput.value], { type: 'application/json;charset=utf-8' }));
+          link = document.createElement('a'); link.href = url; link.download = 'DOM-Window-诊断.json';
+          document.body.append(link); link.click();
+          diagnosticFeedback.textContent = '已请求下载诊断文件，请查看浏览器的下载列表。';
+        } catch {
+          diagnosticFeedback.textContent = '浏览器未能下载文件，请全选下方文本后复制。';
+        } finally {
+          link?.remove();
+          if (url) setTimeout(() => URL.revokeObjectURL(url), 10000);
         }
       });
       updateStatusPanel();
@@ -912,9 +1012,25 @@ export function disable() { return disposeExtension(); }
     return `${Math.round(bytes / 1048576)} MB`;
   }
 
+  function updateDiagnosticSummary() {
+    const output = document.getElementById('dom_window_diagnostics_summary');
+    if (!output) return;
+    const info = diagnostics.recovery();
+    const time = value => value == null ? '未取得' : new Date(value).toLocaleString();
+    const id = value => value ? value.slice(-8) : '无编号';
+    const text = `${info.message}\n本页 ${id(info.currentPageId)}：${time(info.currentStartedAt)}。` +
+      `\n上次 ${id(info.previousPageId)}：${time(info.previousStartedAt)}；最后记录：${time(info.previousLastRecordedAt)}。` +
+      `\n保留 ${info.retainedPreviousPages} 次历史页面记录。` +
+      (info.source === 'browser-backup' ? ' 上次记录来自浏览器本地备份。' : '') +
+      (info.unlinkedBrowserPages ? ` 另有 ${info.unlinkedBrowserPages} 份来源未确认的浏览器记录，可能属于其他标签页。` : '') +
+      (!info.sessionStorageAvailable && !info.browserBackupAvailable ? ' 浏览器未允许持久保存，离开页面后记录可能丢失。' : '');
+    if (output.textContent !== text) output.textContent = text;
+  }
+
   function updateStatusPanel() {
     const statusEl = document.getElementById('dom_window_status');
     if (!statusEl) return;
+    updateDiagnosticSummary();
 
     const chat = getChat();
     const chatEl = getChatEl();
@@ -955,6 +1071,7 @@ export function disable() { return disposeExtension(); }
   }
 
   const statusInterval = setInterval(() => {
+    bindDiagnosticEvents();
     if (!document.hidden) updateStatusPanel();
     if (!document.hidden && Date.now() - lastCheckpoint >= 10000) {
       lastCheckpoint = Date.now(); diagnostics.checkpoint(diagnosticMetrics());
@@ -967,6 +1084,10 @@ export function disable() { return disposeExtension(); }
     skipUnloadRefresh = state.background || state.paused || renderQueue.snapshot().running > 0;
     if (skipUnloadRefresh) renderQueue.dispose();
     clearInterval(statusInterval);
+    clearPresetSamples(); unbindDiagnosticEvents();
+    document.removeEventListener('change', presetSelected, true);
+    window.removeEventListener('error', recordPageError);
+    window.removeEventListener('unhandledrejection', recordPageError);
     pageEvents.forEach(name => window.removeEventListener(name, updateVisibility));
     documentEvents.forEach(name => document.removeEventListener(name, updateVisibility));
     document.getElementById('dom_window_settings')?.remove();

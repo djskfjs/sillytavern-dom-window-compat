@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createBrowserStorage, createDiagnostics } from '../runtime-support.js';
+import { createBrowserStorage, createDiagnostics, getDiagnosticPageId } from '../runtime-support.js';
 
 test('explicit reload marker survives pagehide and only accepts known reasons', () => {
   const values = new Map();
@@ -100,7 +100,7 @@ test('previous diagnostics retain only allowed metadata, event names and scalar 
       framesInChat: { token: 'private-token' }, chatLength: 'private-chat', paused: null, pending: -1 } };
   const { storage } = storageFixture({ [diagnosticKey]: JSON.stringify(saved) });
   const diagnostics = createDiagnostics({ storage, version: 'test', now: () => 200 });
-  assert.deepEqual(diagnostics.snapshot().previousPage, { startedAt: 100, updatedAt: 120, lastEvent: 'unknown',
+  assert.deepEqual(diagnostics.snapshot().previousPage, { schema: 1, startedAt: 100, updatedAt: 120, lastEvent: 'unknown',
     metrics: { enabled: true, messagesInDom: 5 } });
   assert.doesNotMatch(JSON.stringify(diagnostics.snapshot()), /private-(chat|url|token)/);
 });
@@ -129,10 +129,10 @@ test('event history is capped at the latest 24 entries in memory and persistent 
   for (let i = 0; i < 80; i++) {
     const event = i % 2 ? 'visible' : 'hidden';
     diagnostics.record(event, { background: i % 2 === 0 });
-    expected.push({ at: now - 1, event });
+    expected.push({ at: now - 1, event, metrics: { background: i % 2 === 0 } });
   }
   assert.deepEqual(diagnostics.snapshot().currentPage.events, expected.slice(-24));
-  assert.deepEqual(JSON.parse(values.get(diagnosticKey)).events, expected.slice(-24));
+  assert.deepEqual(JSON.parse(values.get(diagnosticKey)).currentPage.events, expected.slice(-24));
   assert.equal(diagnostics.snapshot().currentPage.lastEvent, 'visible');
 });
 
@@ -144,4 +144,197 @@ test('exported snapshots do not allow callers to mutate future diagnostic record
   exported.currentPage.metrics.token = 'private-token';
   exported.currentPage.events.push({ event: 'private-chat' });
   assert.doesNotMatch(JSON.stringify(diagnostics.snapshot()), /private-(chat|token)/);
+});
+
+test('reload preserves event-time counts, build and last event time independently of checkpoints', () => {
+  const { storage } = storageFixture();
+  let time = 100;
+  const first = createDiagnostics({ storage, version: '0.4.3-compat.6', build: '本地预览-20261108-诊断复制与预设追踪', now: () => time });
+  first.record('preset-before', { framesOutsideChat: 4, helperScriptFrames: 4 });
+  time = 200;
+  first.record('preset-after', { framesOutsideChat: 7, helperScriptFrames: 7 });
+  time = 400;
+  first.checkpoint({ framesOutsideChat: 3, helperScriptFrames: 3 });
+  const next = createDiagnostics({ storage, version: '0.4.3-compat.6', now: () => 500 }).snapshot().previousPage;
+  assert.equal(next.version, '0.4.3-compat.6');
+  assert.equal(next.build, '本地预览-20261108-诊断复制与预设追踪');
+  assert.equal(next.lastEventAt, 200);
+  assert.equal(next.updatedAt, 400);
+  assert.equal(next.metrics.helperScriptFrames, 3);
+  assert.deepEqual(next.events.map(entry => entry.metrics.helperScriptFrames), [4, 7]);
+});
+
+test('last preset evidence survives unrelated event churn but resets for the next selection', () => {
+  const { storage } = storageFixture();
+  let time = 100;
+  const first = createDiagnostics({ storage, version: 'test', now: () => time++ });
+  first.record('preset-selected', { helperScriptFrames: 4 });
+  first.record('preset-before', { helperScriptFrames: 4 });
+  first.record('preset-after', { helperScriptFrames: 8 });
+  for (let i = 0; i < 40; i++) first.record('visible', { background: false });
+  const next = createDiagnostics({ storage, version: 'test', now: () => time++ }).snapshot().previousPage;
+  assert.equal(next.events.length, 24);
+  assert.deepEqual(next.lastPreset.events.map(entry => entry.event), ['preset-selected', 'preset-before', 'preset-after']);
+  first.record('preset-before', { helperScriptFrames: 1 });
+  assert.equal(first.snapshot().currentPage.lastPreset.events.length, 1);
+  first.record('preset-after');
+  for (let i = 0; i < 30; i++) first.record('preset-sample');
+  assert.equal(first.snapshot().currentPage.lastPreset.events.length, 8);
+  assert.equal(first.snapshot().currentPage.lastPreset.events[0].event, 'preset-before');
+  const reloaded = createDiagnostics({ storage, version: 'test', now: () => time++ }).snapshot().previousPage;
+  assert.equal(reloaded.lastPreset.events[0].event, 'preset-before');
+  assert.equal(reloaded.lastPreset.events[0].metrics.helperScriptFrames, 1);
+});
+
+test('old schema-one event history remains readable without invented new evidence', () => {
+  const { storage } = storageFixture({ [diagnosticKey]: JSON.stringify({ schema: 1, version: '0.4.3-compat.6',
+    startedAt: 100, updatedAt: 300, lastEvent: 'generation-end', metrics: { framesInPage: 4 },
+    events: [{ at: 100, event: 'load' }, { at: 200, event: 'generation-end' }] }) });
+  const previous = createDiagnostics({ storage, version: 'test' }).snapshot().previousPage;
+  assert.equal(previous.events.length, 2);
+  assert.equal(previous.lastEventAt, undefined, 'old heartbeat time is not the event time');
+  assert.equal(previous.lastPreset, undefined);
+});
+
+test('saved events and preset evidence are sanitized before being re-exported', () => {
+  const bad = { at: 110, event: 'preset-before', name: 'private-name', metrics: {
+    helperScriptFrames: 4, token: 'private-token', framesOutsideChat: 'private-url' } };
+  const { storage } = storageFixture({ [diagnosticKey]: JSON.stringify({ schema: 1, startedAt: 100,
+    events: [bad, { at: -1, event: 'preset-after' }, { at: 120, event: 'private-name' }],
+    lastPreset: { startedAt: 110, name: 'private-name', events: [bad, { at: 120, event: 'load' }] } }) });
+  const snapshot = createDiagnostics({ storage, version: 'test' }).snapshot();
+  assert.deepEqual(snapshot.previousPage.lastPreset.events, [{ at: 110, event: 'preset-before', metrics: { helperScriptFrames: 4 } }]);
+  assert.deepEqual(snapshot.previousPage.events, snapshot.previousPage.lastPreset.events);
+  assert.doesNotMatch(JSON.stringify(snapshot), /private-/);
+});
+
+test('first run reports missing previous evidence, not a normal or successful restart', () => {
+  const { storage } = storageFixture();
+  const diagnostics = createDiagnostics({ storage, version: 'test', now: () => 100 });
+  diagnostics.record('load');
+  const report = diagnostics.snapshot();
+  assert.equal(report.recovery.observation, 'no-previous-record');
+  assert.equal(report.recovery.cause, 'unknown');
+  assert.equal(report.recovery.previousStartedAt, null);
+  assert.deepEqual(report.previousPages, []);
+});
+
+test('same counts after abrupt interruption retain distinct pages and three generations of history', () => {
+  const { raw } = storageFixture();
+  const backup = storageFixture();
+  const ids = [];
+  let report;
+  for (const time of [100, 200, 300, 400]) {
+    const diagnostics = createDiagnostics({ storage: createBrowserStorage(() => raw), backupStorage: backup.storage,
+      version: '0.4.3-compat.7', build: '重载记录留存', now: () => time });
+    diagnostics.record('preset-before', { framesInPage: 4, chatLength: 0 });
+    report = diagnostics.snapshot(); ids.push(report.currentPage.pageId);
+  }
+  assert.equal(new Set(ids).size, 4);
+  assert.deepEqual(report.previousPages.map(page => page.startedAt), [300, 200, 100]);
+  assert(report.previousPages.every(page => page.version === '0.4.3-compat.7' && page.build === '重载记录留存'));
+  assert.equal(report.previousPages.at(-1).lastPreset.events[0].event, 'preset-before');
+  assert.equal(report.recovery.observation, 'no-page-exit-recorded');
+  assert.equal(report.recovery.cause, 'unknown');
+  assert.equal(report.currentPage.metrics.framesInPage, report.previousPage.metrics.framesInPage);
+  const last = createDiagnostics({ storage: createBrowserStorage(() => raw), backupStorage: backup.storage,
+    version: '0.4.3-compat.7', build: '重载记录留存', now: () => 500 });
+  last.record('load');
+  assert.deepEqual(last.snapshot().previousPages.map(page => page.startedAt), [400, 300, 200]);
+  assert.equal(JSON.parse(backup.values.get('STDOMWindow.compat.diagnosticHistory')).pages.length, 4);
+});
+
+test('missing session report recovers matching-tab browser backup', () => {
+  const session = storageFixture(), backup = storageFixture();
+  const first = createDiagnostics({ storage: session.storage, backupStorage: backup.storage, version: 'test', now: () => 100 });
+  first.record('preset-before', { helperScriptFrames: 4 });
+  session.raw.removeItem(diagnosticKey);
+  const next = createDiagnostics({ storage: createBrowserStorage(() => session.raw), backupStorage: backup.storage,
+    version: 'test', now: () => 200 });
+  assert.equal(next.recovery().source, 'browser-backup');
+  assert.equal(next.snapshot().previousPage.pageId, first.snapshot().currentPage.pageId);
+  assert.equal(next.snapshot().previousPage.lastPreset.events[0].metrics.helperScriptFrames, 4);
+});
+
+test('lost tab identity never misattributes another browser record as this page predecessor', () => {
+  const session = storageFixture(), backup = storageFixture();
+  const first = createDiagnostics({ storage: session.storage, backupStorage: backup.storage, version: 'test', now: () => 100 });
+  first.record('preset-before');
+  const next = createDiagnostics({ storage: storageFixture().storage, backupStorage: backup.storage, version: 'test', now: () => 200 });
+  const report = next.snapshot();
+  assert.equal(report.previousPage, null);
+  assert.equal(report.recovery.observation, 'no-previous-record');
+  assert.equal(report.recovery.unlinkedBrowserPages, 1);
+  assert.equal(report.unlinkedBrowserPages[0].pageId, first.snapshot().currentPage.pageId);
+});
+
+test('fresh shared backup reads preserve two tabs without mixing their preceding pages', () => {
+  const sessionA = storageFixture(), sessionB = storageFixture(), backup = storageFixture();
+  let timeA = 100, timeB = 200;
+  const a = createDiagnostics({ storage: sessionA.storage, backupStorage: createBrowserStorage(() => backup.raw),
+    version: 'test', now: () => timeA });
+  a.record('load');
+  const b = createDiagnostics({ storage: sessionB.storage, backupStorage: createBrowserStorage(() => backup.raw),
+    version: 'test', now: () => timeB });
+  b.record('load');
+  timeA = 300; a.record('preset-before');
+  timeB = 400; b.record('preset-before');
+  assert.equal(JSON.parse(backup.values.get('STDOMWindow.compat.diagnosticHistory')).pages.length, 2);
+  sessionA.raw.removeItem(diagnosticKey);
+  const nextA = createDiagnostics({ storage: createBrowserStorage(() => sessionA.raw), backupStorage: backup.storage,
+    version: 'test', now: () => 500 });
+  assert.equal(nextA.snapshot().previousPage.pageId, a.snapshot().currentPage.pageId);
+  assert.notEqual(nextA.snapshot().previousPage.pageId, b.snapshot().currentPage.pageId);
+});
+
+test('reinitializing the extension in the same document does not fabricate another page load', () => {
+  const { storage } = storageFixture();
+  const documentA = {}, documentB = {};
+  assert.equal(getDiagnosticPageId(documentA), getDiagnosticPageId(documentA));
+  assert.notEqual(getDiagnosticPageId(documentA), getDiagnosticPageId(documentB));
+  const first = createDiagnostics({ storage, version: 'test', pageId: getDiagnosticPageId(documentA), now: () => 100 });
+  first.record('preset-before');
+  const reloadExtension = createDiagnostics({ storage, version: 'test', pageId: getDiagnosticPageId(documentA), now: () => 200 });
+  reloadExtension.record('extension-reloaded');
+  assert.equal(reloadExtension.resumed, true);
+  assert.equal(reloadExtension.snapshot().currentPage.startedAt, 100);
+  assert.equal(reloadExtension.snapshot().previousPage, null);
+  assert.equal(reloadExtension.snapshot().currentPage.lastPreset.events[0].event, 'preset-before');
+});
+
+test('page exit survives event churn but returning from back-forward cache clears the exit', () => {
+  const { storage } = storageFixture();
+  const first = createDiagnostics({ storage, version: 'test', pageId: 'page-first', now: () => 100 });
+  first.record('pagehide', { persisted: true });
+  for (let i = 0; i < 40; i++) first.record('hidden');
+  const next = createDiagnostics({ storage, version: 'test', now: () => 200 });
+  assert.equal(next.recovery().observation, 'page-exit-recorded');
+  first.record('pageshow', { persisted: true });
+  const afterReturn = createDiagnostics({ storage, version: 'test', now: () => 300 });
+  assert.equal(afterReturn.recovery().observation, 'no-page-exit-recorded');
+  assert.equal(afterReturn.recovery().cause, 'unknown');
+});
+
+test('new and old browser history only re-export known fields and bounded records', () => {
+  const backup = storageFixture({ 'STDOMWindow.compat.diagnosticHistory': JSON.stringify({ schema: 1,
+    pages: Array.from({ length: 15 }, (_, i) => ({ schema: 1, pageId: `page-id-${i}`, tabId: 'private-token/invalid',
+      startedAt: 100 + i, updatedAt: 120 + i, chat: 'private-chat', url: 'private-url',
+      pageExit: { at: -1, persisted: 'private-key' }, metrics: { framesInPage: 4, token: 'private-token' } })) }) });
+  const diagnostics = createDiagnostics({ storage: storageFixture().storage, backupStorage: backup.storage,
+    version: 'test', now: () => 200 });
+  const report = diagnostics.snapshot();
+  assert.equal(report.unlinkedBrowserPages.length, 4);
+  assert.doesNotMatch(JSON.stringify(report), /private-/);
+  diagnostics.record('load');
+  assert.doesNotMatch(backup.values.get('STDOMWindow.compat.diagnosticHistory'), /private-/);
+});
+
+test('fresh storage reads see other writers and preserve in-page data when denied', () => {
+  const { storage, raw } = storageFixture({ value: 'first' });
+  assert.equal(storage.getItem('value'), 'first');
+  raw.setItem('value', 'second');
+  assert.equal(storage.getItem('value', { fresh: true }), 'second');
+  raw.getItem = () => { throw new Error('Denied'); };
+  assert.equal(storage.getItem('value', { fresh: true }), 'second');
+  assert.equal(storage.persistent, false);
 });

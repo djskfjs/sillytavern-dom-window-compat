@@ -1,0 +1,203 @@
+{
+  "date": "2026-11-08",
+  "version": "0.4.3-compat.6",
+  "build": "本地预览-20261108-诊断复制与预设追踪",
+  "published": false,
+  "totalPassed": 118.0,
+  "unitTests": {
+    "command": "node --test tests/*.test.mjs",
+    "passed": 38,
+    "exitCode": 0
+  },
+  "regressionCommand": "npm test",
+  "regressionExitCode": 0,
+  "finalRetentionRecheck": {
+    "webkitDiagnostics": 14,
+    "chromiumDiagnostics": 14,
+    "runtimeUnitTests": 15,
+    "exitCode": 0
+  },
+  "suites": [
+    {
+      "report": "regression/test-report.json",
+      "exitCode": 0,
+      "count": 22,
+      "cases": [
+        "模型复现助手强引用残留及目标回收",
+        "清理事件批量创建前端后，队列复用已有iframe",
+        "助手DOM替换监听已生效，正常窗口移动不重复替换楼层",
+        "modern API：5层上下阅读和关闭恢复",
+        "legacy API：5层上下阅读和关闭恢复",
+        "设置10层：10个前端全部完成",
+        "单次跨上下巨大占位后停手：非空视口且10层恢复",
+        "慢前端和快速反向：旧任务不滞留",
+        "12000px末楼不会错误拉动历史窗口",
+        "异步回收期间继续滑动：最终手势接管位置",
+        "历史阅读时追加消息：区间和重叠实例保留",
+        "相邻窗口复用重叠iframe",
+        "120轮跨历史滚动：后台最多11个实例，无脱离DOM引用",
+        "恢复时切换聊天：无旧前端污染",
+        "底部追加：最近10层继续移动",
+        "单个恢复失败后继续其他楼层",
+        "挂载异常后暂停并保留末楼，不批量恢复",
+        "旧开关不自动继承，重复加载保护",
+        "扩展卸载与重新加载",
+        "未知助手版本拒绝启动，避免半成品回收",
+        "同步查找旧楼层时移动完整窗口",
+        "挂起恢复取消后仍有超时守护，不启动第二个恢复调用"
+      ]
+    },
+    {
+      "report": "regression/scroll-report.json",
+      "exitCode": 0,
+      "count": 10,
+      "cases": [
+        "No scroll write for a resize below the reader",
+        "Continuous scrolling cannot starve visible frontend recovery",
+        "Slow helper cleanup keeps the overlapping row stationary",
+        "Native scroll anchoring is disabled only while the window is enabled",
+        "Long hidden source does not become a giant blank row",
+        "Small upward wheel gestures keep making progress",
+        "Changing 10 to 15 to 5 floors preserves the reader without reload",
+        "One activation adapts both helper settings and closing restores them",
+        "Interrupted shutdown waits for explicit restoration without an automatic reload",
+        "Missing randomUUID and changing capacity while closed require no reload"
+      ]
+    },
+    {
+      "report": "regression/compat-safety-chromium.json",
+      "exitCode": 0,
+      "count": 10,
+      "cases": [
+        "blocked browser storage keeps initialization usable and does not orphan helper backups",
+        "extension unload restores ordinary rows with a suspended frontend and already compatible helper",
+        "diagnostic data omits chat, credentials and page URL, including display output",
+        "extension unload restores ordinary rows with a suspended frontend and adapted helper",
+        "hidden page pauses pending work and resumes the requested reading position",
+        "manual reload is blocked during generation and works after it finishes",
+        "mount failure pauses without automatic restoration or navigation",
+        "background time does not consume an active frontend timeout or cause a second call",
+        "15-second stall preserves page and already compatible helper settings",
+        "15-second stall preserves page and adapted helper settings"
+      ]
+    },
+    {
+      "report": "regression/generation-safety-chromium.json",
+      "exitCode": 0,
+      "count": 10,
+      "cases": [
+        "streaming append and native auto-scroll",
+        "scroll history during streaming",
+        "generation interrupts in-flight frontend recovery",
+        "dry-run, quiet and impersonation do not hold the reading window",
+        "stop-before-final-render",
+        "background",
+        "back-to-back",
+        "enable-during-generation",
+        "generation interrupts asynchronous cleanup",
+        "30 streaming turns with history scrolling"
+      ]
+    },
+    {
+      "report": "chromium/diagnostics-chromium.json",
+      "exitCode": 0,
+      "count": 14,
+      "cases": [
+        "clipboard legacy: truthful result and selectable complete report",
+        "clipboard modern: truthful result and selectable complete report",
+        "clipboard missing: truthful result and selectable complete report",
+        "clipboard rejected: truthful result and selectable complete report",
+        "clipboard throws: truthful result and selectable complete report",
+        "clipboard pending: truthful result and selectable complete report",
+        "clipboard getter-throws: truthful result and selectable complete report",
+        "real browser copy event receives the selected report",
+        "modern clipboard remains usable when text selection throws",
+        "empty chat: preset samples capture script frames while window disabled, survive reload",
+        "enabled window: programmatic preset changes preserve chat, frames and settings",
+        "new preset selection cancels delayed samples from the preceding selection",
+        "diagnostic storage denied is reported independently of settings storage",
+        "disposing removes preset diagnostics listeners"
+      ]
+    },
+    {
+      "report": "webkit/diagnostics-webkit.json",
+      "exitCode": 0,
+      "count": 14,
+      "cases": [
+        "clipboard legacy: truthful result and selectable complete report",
+        "clipboard modern: truthful result and selectable complete report",
+        "clipboard missing: truthful result and selectable complete report",
+        "clipboard rejected: truthful result and selectable complete report",
+        "clipboard throws: truthful result and selectable complete report",
+        "clipboard pending: truthful result and selectable complete report",
+        "clipboard getter-throws: truthful result and selectable complete report",
+        "real browser copy event receives the selected report",
+        "modern clipboard remains usable when text selection throws",
+        "empty chat: preset samples capture script frames while window disabled, survive reload",
+        "enabled window: programmatic preset changes preserve chat, frames and settings",
+        "new preset selection cancels delayed samples from the preceding selection",
+        "diagnostic storage denied is reported independently of settings storage",
+        "disposing removes preset diagnostics listeners"
+      ]
+    }
+  ],
+  "limits": [
+    "Synthetic chat and helper fixture; no iPhone device test.",
+    "No phone white-screen crash reproduced or claimed fixed.",
+    "Historical upstream comparison was skipped because its source path was not supplied."
+  ],
+  "sha256": [
+    {
+      "file": "index.js",
+      "sha256": "168797274E3A27D733AF96CB662EFE4AC2A8FA4380288409F62E0C756E22A112"
+    },
+    {
+      "file": "runtime-support.js",
+      "sha256": "4CFF04C3CB62693EF61A154195FD8827EB47E7640F6E51234D645D70F7CC994B"
+    },
+    {
+      "file": "render-queue.js",
+      "sha256": "EBCF752D8E747B6CF1B3C4042D1BA02156AB7BE1D52161A3DC2AB95471D6CAB8"
+    },
+    {
+      "file": "moving-window.js",
+      "sha256": "F9ACC06ED755ED1F979EDEA8E6B829C2CB53302803F66D3B73EF262BD152D198"
+    },
+    {
+      "file": "helper-lifecycle.js",
+      "sha256": "538E64F6C7EAA722CA7038CE7D863EB18905A7BADF013D538C7780A6607003F4"
+    },
+    {
+      "file": "helper-setup.js",
+      "sha256": "1FC159EC752A3AE1887801081BDFFEAC994930B8D0249608D4601E801A5C28A2"
+    },
+    {
+      "file": "manifest.json",
+      "sha256": "28B362A91E4349CCF685DA1FCDB8B617ADB238F6C45951BB6AD39625FE491314"
+    },
+    {
+      "file": "settings.html",
+      "sha256": "6D71DC8DB7CC4721B0111EEB2E68D923D299CA77F3FA7CA340DD9160CD43455F"
+    },
+    {
+      "file": "style.css",
+      "sha256": "B4A5E26603DF1B908FC3141848268EB4918614B773B3D9998708ABC43D5016BA"
+    },
+    {
+      "file": "package.json",
+      "sha256": "962F3A904213F498578FEF3E8F6B8430749B89D5DC77A6C6E44341EE48D81BDA"
+    },
+    {
+      "file": "tests/diagnostics-browser.mjs",
+      "sha256": "0BD792A6812B8943139FC8ADD5FAF98EAA3B167E89AE2FCEC301958D01B8843A"
+    },
+    {
+      "file": "tests/runtime-support.test.mjs",
+      "sha256": "9CB89DC7793AC2AFE824F7A4DBE382B098D7967634FF81164FA7FD2B586835E1"
+    },
+    {
+      "file": "tests/fixture.js",
+      "sha256": "756B9329E3A79FBF2D80DF5E94893D74BB7797159095F6FE95ADE75FEEE662EC"
+    }
+  ]
+}

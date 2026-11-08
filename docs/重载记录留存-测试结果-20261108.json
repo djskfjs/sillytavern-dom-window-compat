@@ -1,0 +1,252 @@
+{
+  "date": "2026-11-08",
+  "version": "0.4.3-compat.6",
+  "build": "本地预览-20261108-重载记录留存",
+  "published": false,
+  "totalPassed": 94.0,
+  "unitTests": {
+    "passed": 47,
+    "exitCode": 0
+  },
+  "suites": [
+    {
+      "report": "chromium/diagnostics-chromium.json",
+      "exitCode": 0,
+      "count": 19,
+      "cases": [
+        "clipboard legacy: truthful result and selectable complete report",
+        "clipboard modern: truthful result and selectable complete report",
+        "clipboard missing: truthful result and selectable complete report",
+        "clipboard rejected: truthful result and selectable complete report",
+        "clipboard throws: truthful result and selectable complete report",
+        "clipboard pending: truthful result and selectable complete report",
+        "clipboard getter-throws: truthful result and selectable complete report",
+        "real browser copy event receives the selected report",
+        "modern clipboard remains usable when text selection throws",
+        "empty chat: preset samples capture script frames while window disabled, survive reload",
+        "enabled window: programmatic preset changes preserve chat, frames and settings",
+        "new preset selection cancels delayed samples from the preceding selection",
+        "diagnostic storage denied is reported independently of settings storage",
+        "identical page counts still produce distinct reports and retain preceding page identities",
+        "session report loss recovers the matching browser backup",
+        "lost session and tab identity expose backup records as unlinked rather than declaring a restart",
+        "extension reloading within one document keeps the same page and prior evidence",
+        "renderer process crash retains pre-crash evidence without a pagehide event",
+        "disposing removes preset diagnostics listeners"
+      ]
+    },
+    {
+      "report": "webkit/diagnostics-webkit.json",
+      "exitCode": 0,
+      "count": 18,
+      "cases": [
+        "clipboard legacy: truthful result and selectable complete report",
+        "clipboard modern: truthful result and selectable complete report",
+        "clipboard missing: truthful result and selectable complete report",
+        "clipboard rejected: truthful result and selectable complete report",
+        "clipboard throws: truthful result and selectable complete report",
+        "clipboard pending: truthful result and selectable complete report",
+        "clipboard getter-throws: truthful result and selectable complete report",
+        "real browser copy event receives the selected report",
+        "modern clipboard remains usable when text selection throws",
+        "empty chat: preset samples capture script frames while window disabled, survive reload",
+        "enabled window: programmatic preset changes preserve chat, frames and settings",
+        "new preset selection cancels delayed samples from the preceding selection",
+        "diagnostic storage denied is reported independently of settings storage",
+        "identical page counts still produce distinct reports and retain preceding page identities",
+        "session report loss recovers the matching browser backup",
+        "lost session and tab identity expose backup records as unlinked rather than declaring a restart",
+        "extension reloading within one document keeps the same page and prior evidence",
+        "disposing removes preset diagnostics listeners"
+      ]
+    },
+    {
+      "report": "safety/compat-safety-chromium.json",
+      "exitCode": 0,
+      "count": 10,
+      "cases": [
+        "blocked browser storage keeps initialization usable and does not orphan helper backups",
+        "extension unload restores ordinary rows with a suspended frontend and already compatible helper",
+        "diagnostic data omits chat, credentials and page URL, including display output",
+        "extension unload restores ordinary rows with a suspended frontend and adapted helper",
+        "hidden page pauses pending work and resumes the requested reading position",
+        "manual reload is blocked during generation and works after it finishes",
+        "mount failure pauses without automatic restoration or navigation",
+        "15-second stall preserves page and already compatible helper settings",
+        "background time does not consume an active frontend timeout or cause a second call",
+        "15-second stall preserves page and adapted helper settings"
+      ]
+    }
+  ],
+  "finalUIRecheck": {
+    "case": "identical page counts",
+    "exitCode": 0,
+    "engine": "webkit"
+  },
+  "rendererCrashEvidence": {
+    "environment": "Desktop Chrome synthetic test; renderer terminated through DevTools Page.crash. Not an iPhone crash reproduction.",
+    "before": {
+      "pageId": "2fddbbc2-8383-432d-84f1-24c4d82ba6c8",
+      "startedAt": 1794147289710,
+      "frames": 20,
+      "lastEvent": "preset-before"
+    },
+    "after": {
+      "pageId": "63bb342b-ca58-42a8-80de-e891975f6e98",
+      "startedAt": 1794147290048,
+      "frames": 20,
+      "recovery": {
+        "source": "session",
+        "observation": "no-page-exit-recorded",
+        "cause": "unknown",
+        "message": "已取得上次页面记录，但没有页面离开事件。可能发生中断，也可能未触发离开事件，不能据此确定崩溃原因。",
+        "currentPageId": "63bb342b-ca58-42a8-80de-e891975f6e98",
+        "currentStartedAt": 1794147290048,
+        "previousPageId": "2fddbbc2-8383-432d-84f1-24c4d82ba6c8",
+        "previousStartedAt": 1794147289710,
+        "previousLastRecordedAt": 1794147289754,
+        "retainedPreviousPages": 1,
+        "unlinkedBrowserPages": 0,
+        "sessionStorageAvailable": true,
+        "browserBackupAvailable": true
+      },
+      "previousPage": {
+        "schema": 1,
+        "startedAt": 1794147289710,
+        "updatedAt": 1794147289754,
+        "lastEvent": "preset-before",
+        "metrics": {
+          "enabled": false,
+          "paused": false,
+          "background": false,
+          "generating": false,
+          "contextAvailable": true,
+          "chatRootConnected": true,
+          "chatLength": 37,
+          "messagesInDom": 20,
+          "framesInChat": 20,
+          "framesInPage": 20,
+          "framesOutsideChat": 0,
+          "helperScriptFrames": 0,
+          "helperMessageFrames": 20,
+          "otherFrames": 0,
+          "running": 0,
+          "pending": 0,
+          "stalled": false
+        },
+        "pageId": "2fddbbc2-8383-432d-84f1-24c4d82ba6c8",
+        "tabId": "e1c8bfab-5072-43d8-a1b6-461d7a97f57e",
+        "lastEventAt": 1794147289753,
+        "version": "0.4.3-compat.6",
+        "build": "本地预览-20261108-重载记录留存",
+        "events": [
+          {
+            "at": 1794147289711,
+            "event": "load"
+          },
+          {
+            "at": 1794147289753,
+            "event": "preset-before",
+            "metrics": {
+              "enabled": false,
+              "paused": false,
+              "background": false,
+              "generating": false,
+              "contextAvailable": true,
+              "chatRootConnected": true,
+              "chatLength": 37,
+              "messagesInDom": 20,
+              "framesInChat": 20,
+              "framesInPage": 20,
+              "framesOutsideChat": 0,
+              "helperScriptFrames": 0,
+              "helperMessageFrames": 20,
+              "otherFrames": 0,
+              "running": 0,
+              "pending": 0,
+              "stalled": false
+            }
+          }
+        ],
+        "lastPreset": {
+          "startedAt": 1794147289753,
+          "events": [
+            {
+              "at": 1794147289753,
+              "event": "preset-before",
+              "metrics": {
+                "enabled": false,
+                "paused": false,
+                "background": false,
+                "generating": false,
+                "contextAvailable": true,
+                "chatRootConnected": true,
+                "chatLength": 37,
+                "messagesInDom": 20,
+                "framesInChat": 20,
+                "framesInPage": 20,
+                "framesOutsideChat": 0,
+                "helperScriptFrames": 0,
+                "helperMessageFrames": 20,
+                "otherFrames": 0,
+                "running": 0,
+                "pending": 0,
+                "stalled": false
+              }
+            }
+          ]
+        }
+      }
+    },
+    "afterSecondReload": {
+      "pageId": "480359ea-869c-42e1-827b-fc10aa83e73e",
+      "retainedPageIds": [
+        "63bb342b-ca58-42a8-80de-e891975f6e98",
+        "2fddbbc2-8383-432d-84f1-24c4d82ba6c8"
+      ]
+    }
+  },
+  "limits": [
+    "Synthetic chat and desktop browser engines; no iPhone device test.",
+    "Page.crash validates storage survival, not the cause of the reported iPhone white screen.",
+    "No previous user reports were available for comparison."
+  ],
+  "sha256": [
+    {
+      "file": "index.js",
+      "sha256": "0416EBDF573C2EDC0B7E521835491BA75A4697092A536A084CF78747C041FBE9"
+    },
+    {
+      "file": "runtime-support.js",
+      "sha256": "553E66F59439B3CEB831B63E3C80E01050426FD1A85604BAF3AD95B16A6ED0B8"
+    },
+    {
+      "file": "manifest.json",
+      "sha256": "73BB0FA87EE106E3B83F61DA919B62ED928D53255E45B56D69DF19FCC283AC64"
+    },
+    {
+      "file": "settings.html",
+      "sha256": "577C4D7A0B31109C56FFA1A7A1C660E0EC981C33BABF0EAA6C481A82EDE07DB2"
+    },
+    {
+      "file": "style.css",
+      "sha256": "BEF08FB3A52B6417520D81B2A77DAB8BB283CBAFC2D342311A8715C5C9493706"
+    },
+    {
+      "file": "package.json",
+      "sha256": "962F3A904213F498578FEF3E8F6B8430749B89D5DC77A6C6E44341EE48D81BDA"
+    },
+    {
+      "file": "tests/diagnostics-browser.mjs",
+      "sha256": "584AA5A310FF71F8C9EA67385020A7A5F8B943DE2B4A4AE0DCE4D74E5B01AF25"
+    },
+    {
+      "file": "tests/runtime-support.test.mjs",
+      "sha256": "C5A67FB6B206D9FB9424AD38BA019D6D49038D56D4645230B394A17C7B40DC83"
+    },
+    {
+      "file": "tests/fixture.js",
+      "sha256": "756B9329E3A79FBF2D80DF5E94893D74BB7797159095F6FE95ADE75FEEE662EC"
+    }
+  ]
+}

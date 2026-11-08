@@ -190,5 +190,9 @@ ctx.chat = makeMessages(count); ctx.printMessages(); auditRuntimes();
 if (params.has('nativeAnchor')) document.querySelector('#chat').style.overflowAnchor = 'auto';
 if (params.has('flex')) Object.assign(document.querySelector('#chat').style, { display: 'flex', flexDirection: 'column' });
 initializing = false; window.stats.calls = []; window.stats.maxConcurrent = 0;
+// Deny only diagnostics storage after the fixture's boot counter has run.
+if (params.has('noDiagnosticStorage')) {
+  Object.defineProperty(window, 'sessionStorage', { configurable: true, get() { throw new DOMException('Denied', 'SecurityError'); } });
+}
 window.fixture.entryModule = await import('/extension/index.js?variant=' + params.get('variant'));
 window.fixtureReady = true;
