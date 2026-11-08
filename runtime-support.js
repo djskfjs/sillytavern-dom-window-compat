@@ -28,9 +28,9 @@ export function createDiagnostics({ storage, version, now = Date.now }) {
   const key = 'STDOMWindow.compat.diagnostics';
   const codes = new Set(['load', 'enabled', 'disabled', 'hidden', 'visible', 'pagehide', 'pageshow',
     'freeze', 'resume', 'render-timeout', 'render-error', 'window-error', 'reload-requested',
-    'reload-deferred', 'settings-pending', 'helper-unavailable']);
+    'reload-deferred', 'settings-pending', 'helper-unavailable', 'generation-start', 'generation-end']);
   const fields = new Set(['enabled', 'paused', 'background', 'chatLength', 'messagesInDom',
-    'framesInChat', 'framesInPage', 'running', 'pending', 'stalled', 'persisted']);
+    'framesInChat', 'framesInPage', 'running', 'pending', 'stalled', 'persisted', 'generating']);
   const reloadReasons = new Set(['helper-configured', 'helper-restored', 'manual-recovery']);
   const clean = data => Object.fromEntries(Object.entries(data || {}).filter(([name, value]) =>
     fields.has(name) && (typeof value === 'boolean' || (typeof value === 'number' && Number.isFinite(value) && value >= 0))));

@@ -1,0 +1,185 @@
+{
+  "date": "2026-11-08",
+  "version": "0.4.3-compat.5",
+  "build": "本地预览-20261108-生成期间暂停前端回收",
+  "checksPassed": 106,
+  "baseline": [
+    {
+      "case": "streaming append and native auto-scroll",
+      "refreshes": 0,
+      "releases": 0,
+      "unfinishedReplyFrames": 0
+    },
+    {
+      "case": "scroll history during streaming",
+      "refreshes": 1,
+      "releases": 5,
+      "unfinishedReplyFrames": 1
+    }
+  ],
+  "suites": [
+    {
+      "name": "settings, queue and diagnostic unit tests",
+      "command": "node --test tests/*.test.mjs",
+      "passed": 34
+    },
+    {
+      "name": "regression-chromium/test-report.json",
+      "command": "node tests/browser.mjs",
+      "passed": 22,
+      "cases": [
+        "模型复现助手强引用残留及目标回收",
+        "清理事件批量创建前端后，队列复用已有iframe",
+        "助手DOM替换监听已生效，正常窗口移动不重复替换楼层",
+        "modern API：5层上下阅读和关闭恢复",
+        "legacy API：5层上下阅读和关闭恢复",
+        "设置10层：10个前端全部完成",
+        "单次跨上下巨大占位后停手：非空视口且10层恢复",
+        "慢前端和快速反向：旧任务不滞留",
+        "12000px末楼不会错误拉动历史窗口",
+        "异步回收期间继续滑动：最终手势接管位置",
+        "历史阅读时追加消息：区间和重叠实例保留",
+        "相邻窗口复用重叠iframe",
+        "120轮跨历史滚动：后台最多11个实例，无脱离DOM引用",
+        "恢复时切换聊天：无旧前端污染",
+        "底部追加：最近10层继续移动",
+        "单个恢复失败后继续其他楼层",
+        "挂载异常后暂停并保留末楼，不批量恢复",
+        "旧开关不自动继承，重复加载保护",
+        "扩展卸载与重新加载",
+        "未知助手版本拒绝启动，避免半成品回收",
+        "同步查找旧楼层时移动完整窗口",
+        "挂起恢复取消后仍有超时守护，不启动第二个恢复调用"
+      ]
+    },
+    {
+      "name": "regression-chromium/scroll-report.json",
+      "command": "node tests/scroll-regressions.mjs",
+      "passed": 10,
+      "cases": [
+        "No scroll write for a resize below the reader",
+        "Continuous scrolling cannot starve visible frontend recovery",
+        "Slow helper cleanup keeps the overlapping row stationary",
+        "Native scroll anchoring is disabled only while the window is enabled",
+        "Long hidden source does not become a giant blank row",
+        "Small upward wheel gestures keep making progress",
+        "Changing 10 to 15 to 5 floors preserves the reader without reload",
+        "One activation adapts both helper settings and closing restores them",
+        "Interrupted shutdown waits for explicit restoration without an automatic reload",
+        "Missing randomUUID and changing capacity while closed require no reload"
+      ]
+    },
+    {
+      "name": "regression-chromium/compat-safety-chromium.json",
+      "command": "node tests/compat-safety.mjs",
+      "passed": 10,
+      "cases": [
+        "blocked browser storage keeps initialization usable and does not orphan helper backups",
+        "extension unload restores ordinary rows with a suspended frontend and already compatible helper",
+        "diagnostic data omits chat, credentials and page URL, including display output",
+        "hidden page pauses pending work and resumes the requested reading position",
+        "extension unload restores ordinary rows with a suspended frontend and adapted helper",
+        "manual reload is blocked during generation and works after it finishes",
+        "mount failure pauses without automatic restoration or navigation",
+        "15-second stall preserves page and already compatible helper settings",
+        "background time does not consume an active frontend timeout or cause a second call",
+        "15-second stall preserves page and adapted helper settings"
+      ]
+    },
+    {
+      "name": "fixed-chromium/generation-safety-chromium.json",
+      "command": "node tests/generation-safety.mjs",
+      "passed": 10,
+      "cases": [
+        "streaming append and native auto-scroll",
+        "scroll history during streaming",
+        "generation interrupts in-flight frontend recovery",
+        "dry-run, quiet and impersonation do not hold the reading window",
+        "stop-before-final-render",
+        "background",
+        "back-to-back",
+        "enable-during-generation",
+        "generation interrupts asynchronous cleanup",
+        "30 streaming turns with history scrolling"
+      ]
+    },
+    {
+      "name": "fixed-webkit/generation-safety-webkit.json",
+      "command": "DOM_WINDOW_ENGINE=webkit node tests/generation-safety.mjs",
+      "passed": 10,
+      "cases": [
+        "streaming append and native auto-scroll",
+        "scroll history during streaming",
+        "generation interrupts in-flight frontend recovery",
+        "dry-run, quiet and impersonation do not hold the reading window",
+        "stop-before-final-render",
+        "background",
+        "back-to-back",
+        "enable-during-generation",
+        "generation interrupts asynchronous cleanup",
+        "30 streaming turns with history scrolling"
+      ]
+    },
+    {
+      "name": "fixed-webkit/compat-safety-webkit.json",
+      "command": "DOM_WINDOW_ENGINE=webkit node tests/compat-safety.mjs",
+      "passed": 10,
+      "cases": [
+        "blocked browser storage keeps initialization usable and does not orphan helper backups",
+        "extension unload restores ordinary rows with a suspended frontend and already compatible helper",
+        "diagnostic data omits chat, credentials and page URL, including display output",
+        "extension unload restores ordinary rows with a suspended frontend and adapted helper",
+        "hidden page pauses pending work and resumes the requested reading position",
+        "manual reload is blocked during generation and works after it finishes",
+        "mount failure pauses without automatic restoration or navigation",
+        "15-second stall preserves page and already compatible helper settings",
+        "background time does not consume an active frontend timeout or cause a second call",
+        "15-second stall preserves page and adapted helper settings"
+      ]
+    }
+  ],
+  "sourceSHA256": {
+    "index.js": "a3703d811363b859dd408e94c914e2f34d5845cfd81f8dfad3bed61a970481c6",
+    "moving-window.js": "b6ad3c0bade8806c14c75dd0f919fb9d65e1bc00197aedb4fd2862849a81faa2",
+    "helper-lifecycle.js": "510174c3e3be8138cdbfc7ddfa68426e37aaf35693b9e281045de27a4e000350",
+    "runtime-support.js": "82fc50e39a667814bf827ddefc0a3534c4d0399dd78a3ebb5c3004253cd648fd",
+    "render-queue.js": "ebcf752d8e747b6cf1b3c4042d1ba02156ab7be1d52161a3dc2ab95471d6cab8",
+    "helper-setup.js": "1fc159ec752a3ae1887801081bdffeac994930b8d0249608d4601e801a5c28a2",
+    "manifest.json": "f9708e9cf4c9d7bc7013c311f76cc149b07e3c63bc1c8cf710a065dd0989ad7e",
+    "tests/generation-safety.mjs": "2b78d28a6d36347033dea1611b5dfb349ae55a7f1c848268d734c16debdf012e"
+  },
+  "limitations": [
+    "桌面 Chrome 和桌面 WebKit，合成聊天及助手 4.12.0 生命周期模型。",
+    "未在真实 Via、iPhone、具体角色卡或内存压力下验证，没有复现用户手机的白屏重载。",
+    "历史上游对比源码未配置，browser.mjs 的对应比较跳过；不计入 106 项通过数。",
+    "已开始的单个助手调用无法强行取消；本修复阻止后续扩展调用叠加。"
+  ],
+  "validationStage": "本地实现验证，保留当时版本和哈希",
+  "releaseVersion": "0.4.3-compat.6",
+  "previousGitHubVersion": "0.4.3-compat.4",
+  "releaseValidation": {
+    "version": "0.4.3-compat.6",
+    "unitTestsPassed": 34,
+    "generationTests": [
+      {
+        "engine": "chromium",
+        "passed": 10
+      },
+      {
+        "engine": "webkit",
+        "passed": 10
+      }
+    ],
+    "passed": 54,
+    "sourceSHA256": {
+      "index.js": "c3dac2553471db17e6bce0ffda1a39a25c656ea6af41cc4bebe6eb90e1844078",
+      "moving-window.js": "f9acc06ed755ed1f979edea8e6b829c2cb53302803f66d3b73ef262bd152d198",
+      "helper-lifecycle.js": "538e64f6c7eaa722ca7038ce7d863eb18905a7badf013d538c7780a6607003f4",
+      "runtime-support.js": "82fc50e39a667814bf827ddefc0a3534c4d0399dd78a3ebb5c3004253cd648fd",
+      "render-queue.js": "ebcf752d8e747b6cf1b3c4042d1ba02156ab7be1d52161a3dc2ab95471d6cab8",
+      "helper-setup.js": "1fc159ec752a3ae1887801081bdffeac994930b8d0249608d4601e801a5c28a2",
+      "manifest.json": "d2bd0272e569ae2a6989d55d04fcfa6f6ec21582cc6c135b53fbf49aaeb1f3a4",
+      "tests/generation-safety.mjs": "2b78d28a6d36347033dea1611b5dfb349ae55a7f1c848268d734c16debdf012e"
+    }
+  }
+}

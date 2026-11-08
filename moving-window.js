@@ -1,8 +1,8 @@
-import { hasFrontendCandidate } from './render-queue.js?v=0.4.3-compat.5';
+import { hasFrontendCandidate } from './render-queue.js?v=0.4.3-compat.6';
 
 /** Continuous reading window; chat data and saved message IDs are untouched. */
 export function createMovingWindow({ state, config, getRoot, getChat, mountMessage,
-  renderQueue, refreshMessages, lifecycle, onFailure, onRangeChanged = () => {} }) {
+  renderQueue, refreshMessages, lifecycle, onFailure, onRangeChanged = () => {}, beforeMount = () => {} }) {
   const references = new WeakMap();
   let fallbackHeight = 0;
   let generation = 0;
@@ -18,7 +18,7 @@ export function createMovingWindow({ state, config, getRoot, getChat, mountMessa
   const transitionSlots = new Set();
   const settledDuringTransition = new Set();
   const root = () => getRoot();
-  const running = () => state.enabled && !state.paused && !state.background;
+  const running = () => state.enabled && !state.paused && !state.background && !state.generating;
   const rows = () => [...(root()?.querySelectorAll(':scope > .mes') || [])];
   const size = () => Math.min(getChat().length, Math.max(1, Math.trunc(Number(config.minWindow) || 5)));
   const idOf = element => Number(element.getAttribute('mesid'));
@@ -224,6 +224,7 @@ export function createMovingWindow({ state, config, getRoot, getChat, mountMessa
       // Release Vue runtimes BEFORE adding the new range. Missing-floor signals
       // cannot cause helper's range audit to batch-start the new iframes here.
       await lifecycle.release(removed);
+      await beforeMount();
       if (epoch !== generation || !state.enabled || data !== getChat()) return;
       state.start = next.start; state.end = next.end; state.pinnedId = data.length - 1;
       const created = [];
@@ -419,11 +420,17 @@ export function createMovingWindow({ state, config, getRoot, getChat, mountMessa
     settledDuringTransition.clear();
   }
   function resume() {
-    if (!running()) return;
+    if (!running() || changing) return;
     settledDuringTransition.forEach(releaseHeight); settledDuringTransition.clear();
+    // A cancelled refresh can finish while generation holds the queue. Its
+    // iframe is reusable, but its temporary height still needs releasing.
+    for (const element of reservations.keys()) {
+      if (!element.isConnected || element.querySelector('iframe[id^="TH-message--"]')) releaseHeight(element);
+    }
     measure(); layout(); layoutAnchor = captureAnchor(); observeRows();
     if (target) void drain();
     else if (matches()) onScroll();
+    refreshMessages(rows().filter(el => !el.querySelector('iframe[id^="TH-message--"]')).map(idOf), { owns: () => true });
   }
   return { apply, syncTail, resize, onScroll, getMessageElement, clear, matches, measure, layout,
     captureAnchor, afterRefresh, size, suspend, resume,

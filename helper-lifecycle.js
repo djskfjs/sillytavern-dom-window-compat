@@ -6,7 +6,7 @@
  * This is an internal signal, not a documented unload API. Refuse unknown
  * versions rather than pretending that removing a DOM node releases Vue.
  */
-export function createHelperLifecycle({ getRoot, getHelper, getContext }) {
+export function createHelperLifecycle({ getRoot, getHelper, getContext, beforeRelease = () => {} }) {
   function inspect() {
     const ctx = getContext();
     const render = ctx?.extensionSettings?.tavern_helper?.render;
@@ -41,6 +41,7 @@ export function createHelperLifecycle({ getRoot, getHelper, getContext }) {
     if (!check.version) return;
     for (const id of new Set(ids)) {
       if (!Number.isInteger(id) || id < 0) continue;
+      await beforeRelease();
       const current = inspect();
       if (!current.ok) throw new Error(current.reason);
       const root = getRoot();

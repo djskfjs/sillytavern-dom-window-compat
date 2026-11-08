@@ -1,5 +1,5 @@
 /**
- * DOM Window 0.4.3-compat.5 — browser compatibility build
+ * DOM Window 0.4.3-compat.6 — browser compatibility build
  *
  * 只窗口化 ST 的消息 DOM，不改 chat 数据。
  * - chat 数组保持完整，AI 上下文、存档、消息 ID 不变。
@@ -11,11 +11,11 @@
  * - STDOMWindow.getChat() 返回完整 chat
  * - STDOMWindow.getMessageElement(mesid) 按需挂载某一层
  */
-import { createRenderQueue } from './render-queue.js?v=0.4.3-compat.5';
-import { createMovingWindow } from './moving-window.js?v=0.4.3-compat.5';
-import { createHelperLifecycle } from './helper-lifecycle.js?v=0.4.3-compat.5';
-import { createHelperSetup } from './helper-setup.js?v=0.4.3-compat.5';
-import { createBrowserStorage, createDiagnostics } from './runtime-support.js?v=0.4.3-compat.5';
+import { createRenderQueue } from './render-queue.js?v=0.4.3-compat.6';
+import { createMovingWindow } from './moving-window.js?v=0.4.3-compat.6';
+import { createHelperLifecycle } from './helper-lifecycle.js?v=0.4.3-compat.6';
+import { createHelperSetup } from './helper-setup.js?v=0.4.3-compat.6';
+import { createBrowserStorage, createDiagnostics } from './runtime-support.js?v=0.4.3-compat.6';
 
 let disposeExtension = () => {};
 export function disable() { return disposeExtension(); }
@@ -23,7 +23,7 @@ export function disable() { return disposeExtension(); }
 (() => {
   'use strict';
 
-  const VERSION = '0.4.3-compat.5';
+  const VERSION = '0.4.3-compat.6';
   const LOG = '[DOMWindow]';
   let extensionDisposed = false;
   let restoring = null;
@@ -36,6 +36,9 @@ export function disable() { return disposeExtension(); }
   let lastCheckpoint = 0;
   let pageAway = false;
   let frozen = false;
+  let generationResumeTimer = 0;
+  let generationEventActive = false;
+  const generationWaiters = new Set();
   if (window.STDOMWindow) {
     console.warn(LOG, '检测到另一个 DOM Window 实例，兼容版未重复加载。请只启用一个版本。');
     return;
@@ -58,6 +61,10 @@ export function disable() { return disposeExtension(); }
     MESSAGE_UPDATED: 'message_updated',
     MESSAGE_SWIPED: 'message_swiped',
     MORE_MESSAGES_LOADED: 'more_messages_loaded',
+    GENERATION_STARTED: 'generation_started',
+    GENERATION_AFTER_COMMANDS: 'generation_after_commands',
+    GENERATION_ENDED: 'generation_ended',
+    GENERATION_STOPPED: 'generation_stopped',
   };
 
   const config = {
@@ -77,6 +84,7 @@ export function disable() { return disposeExtension(); }
     enabled: false,
     paused: false,
     background: document.hidden,
+    generating: false,
     mounted: false,
     chatEl: null,
     topSpacer: null,
@@ -174,7 +182,8 @@ export function disable() { return disposeExtension(); }
     },
   });
 
-  const helperLifecycle = createHelperLifecycle({ getRoot: getChatEl, getHelper: () => window.TavernHelper, getContext: getCtx });
+  const helperLifecycle = createHelperLifecycle({ getRoot: getChatEl, getHelper: () => window.TavernHelper,
+    getContext: getCtx, beforeRelease: waitForGeneration });
   const deviceKey = 'STDOMWindow.compat.device';
   let settingsOwner = storage.getItem(deviceKey);
   if (!/^[a-zA-Z0-9-]{8,80}$/.test(settingsOwner || '')) {
@@ -184,13 +193,72 @@ export function disable() { return disposeExtension(); }
   }
   const helperSetup = createHelperSetup({ getHelper: () => window.TavernHelper, getContext: getCtx, owner: settingsOwner });
   const movingWindow = createMovingWindow({ state, config, getRoot: getChatEl, getChat, mountMessage, renderQueue,
-    refreshMessages: refreshMountedMessages, lifecycle: helperLifecycle,
+    refreshMessages: refreshMountedMessages, lifecycle: helperLifecycle, beforeMount: waitForGeneration,
     onRangeChanged: () => updateStatusPanel(),
     onFailure: error => {
       console.warn(LOG, '窗口已暂停', error?.name);
       pauseWindow('window-error', '窗口遇到兼容问题，已暂停并保留当前页面。可导出诊断信息，再点击“刷新页面”。');
     },
   });
+
+  function nativeGenerating() {
+    const ctx = getCtx();
+    try {
+      return !!(window.TavernHelper?.builtin?.duringGenerating?.() ||
+        (typeof ctx?.isGenerating === 'function' ? ctx.isGenerating() : ctx?.isGenerating === true));
+    } catch { return false; }
+  }
+
+  function waitForGeneration() {
+    if (!state.generating || extensionDisposed) return;
+    return new Promise(resolve => generationWaiters.add(resolve));
+  }
+
+  function beginGeneration(type, _options, dryRun) {
+    if (dryRun || type === 'quiet' || type === 'impersonate' || !state.enabled) return;
+    generationEventActive = true;
+    holdGeneration();
+  }
+
+  function holdGeneration() {
+    clearTimeout(generationResumeTimer); generationResumeTimer = 0;
+    if (state.generating) return;
+    state.generating = true;
+    clearTimeout(state.applyTimer); state.applyTimer = 0;
+    if (state.scrollRaf) cancelAnimationFrame(state.scrollRaf);
+    state.scrollRaf = 0;
+    // Helper's cleanup signal audits every mounted floor. During streaming
+    // even a cleanup of an OLD floor can start the unfinished NEW frontend.
+    renderQueue.cancel();
+    renderQueue.setSuspended(true);
+    diagnostics.record('generation-start', diagnosticMetrics());
+    updateStatusPanel();
+  }
+
+  function endGeneration() {
+    if (!state.generating) return;
+    generationEventActive = false;
+    clearTimeout(generationResumeTimer);
+    // Stop/error events can precede the final message render. Let that event
+    // chain finish, and let a following group/tool generation keep the hold.
+    generationResumeTimer = setTimeout(finishGeneration, 200);
+  }
+
+  function finishGeneration() {
+    generationResumeTimer = 0;
+    if (extensionDisposed || !state.enabled || generationEventActive) return;
+    if (nativeGenerating()) { endGeneration(); return; }
+    state.generating = false;
+    for (const resolve of generationWaiters) resolve();
+    generationWaiters.clear();
+    renderQueue.setSuspended(state.background || state.paused);
+    diagnostics.record('generation-end', diagnosticMetrics());
+    if (!state.background && !state.paused) {
+      movingWindow.resume();
+      if (state.forceApply || (!windowMatchesChat() && !syncTail())) scheduleApply(0, state.forceApply);
+    }
+    updateStatusPanel();
+  }
 
   function pauseWindow(reason, message) {
     if (!state.enabled || state.paused) return;
@@ -208,7 +276,7 @@ export function disable() { return disposeExtension(); }
 
   function diagnosticMetrics() {
     const root = getChatEl(), queue = renderQueue.snapshot();
-    return { enabled: state.enabled, paused: state.paused, background: state.background,
+    return { enabled: state.enabled, paused: state.paused, background: state.background, generating: state.generating,
       chatLength: getChat().length, messagesInDom: root?.querySelectorAll(':scope > .mes').length || 0,
       framesInChat: root?.querySelectorAll('iframe').length || 0,
       framesInPage: document.querySelectorAll('iframe').length,
@@ -218,7 +286,7 @@ export function disable() { return disposeExtension(); }
   function getDiagnostics() {
     diagnostics.checkpoint(diagnosticMetrics());
     const check = helperLifecycle.inspect();
-    return { format: 1, version: VERSION, build: '通用浏览器兼容',
+    return { format: 1, version: VERSION, build: '生成期间暂停前端回收',
       browser: navigator.userAgent, storageAvailable: storage.persistent,
       helperVersion: typeof check.version === 'string' && /^[\w.+-]{1,40}$/.test(check.version) ? check.version : null,
       helperCompatible: check.ok, windowSize: config.minWindow,
@@ -227,9 +295,7 @@ export function disable() { return disposeExtension(); }
   }
 
   function requestReload(reason, interactive = false) {
-    const ctx = getCtx();
-    const generating = window.TavernHelper?.builtin?.duringGenerating?.() ||
-      (typeof ctx?.isGenerating === 'function' ? ctx.isGenerating() : ctx?.isGenerating === true);
+    const generating = state.generating || nativeGenerating();
     if (!interactive || document.hidden || pageAway || frozen || generating) {
       pendingReload = reason;
       state.lastRenderError = generating ? '请等回复生成结束，再点击“刷新页面”。'
@@ -251,14 +317,14 @@ export function disable() { return disposeExtension(); }
     if (event.type === 'resume') frozen = false;
     const wasBackground = state.background;
     state.background = document.hidden || pageAway || frozen;
-    renderQueue.setSuspended(state.background || state.paused);
+    renderQueue.setSuspended(state.background || state.paused || state.generating);
     diagnostics.record(event.type === 'visibilitychange' ? (state.background ? 'hidden' : 'visible') : event.type,
       { background: state.background, persisted: !!event.persisted });
     if (state.background) {
       clearTimeout(state.applyTimer); state.applyTimer = 0;
       if (state.scrollRaf) cancelAnimationFrame(state.scrollRaf);
       state.scrollRaf = 0;
-    } else if (wasBackground && state.enabled && !state.paused) {
+    } else if (wasBackground && state.enabled && !state.paused && !state.generating) {
       const check = helperLifecycle.inspect();
       if (!check.ok) pauseWindow('helper-unavailable', `${check.reason} 窗口已暂停，当前页面已保留。`);
       else {
@@ -312,7 +378,7 @@ export function disable() { return disposeExtension(); }
   // addOneMessage 只重建正文，不会补发消息渲染事件；酒馆助手的楼层界面
   // 依赖该事件生成 iframe，所以重新挂载后要主动刷新一次。
   function refreshMountedMessages(ids, { force = false, owns = element => mountedByUs.has(element) } = {}) {
-    if (state.paused) return;
+    if (state.paused || state.generating) return;
     renderQueue.enqueue(ids, { force, owns });
   }
 
@@ -384,14 +450,14 @@ export function disable() { return disposeExtension(); }
   function windowMatchesChat() { return movingWindow.matches(); }
 
   function apply(force = false) {
-    if (state.paused || state.background) return false;
+    if (state.paused || state.background || state.generating) return false;
     return movingWindow.apply(force);
   }
 
   function scheduleApply(delay = 120, force = false) {
     if (!state.enabled || state.paused) return;
     state.forceApply = state.forceApply || force;
-    if (state.background) return;
+    if (state.background || state.generating) return;
     clearTimeout(state.applyTimer);
     state.applyTimer = setTimeout(() => {
       state.applyTimer = 0;
@@ -407,7 +473,7 @@ export function disable() { return disposeExtension(); }
   function syncTail() { return movingWindow.syncTail(); }
 
   function handleExternalRender(id) {
-    if (state.paused || state.background) return;
+    if (state.paused || state.background || state.generating) return;
     if (!state.mounted) {
       scheduleApply(250);
       return;
@@ -476,13 +542,19 @@ export function disable() { return disposeExtension(); }
     });
     on('MESSAGE_DELETED', () => scheduleApply(250));
     on('MORE_MESSAGES_LOADED', () => scheduleApply(250));
+    on('GENERATION_STARTED', beginGeneration);
+    on('GENERATION_AFTER_COMMANDS', beginGeneration);
+    on('GENERATION_ENDED', endGeneration);
+    on('GENERATION_STOPPED', endGeneration);
     on('MESSAGE_UPDATED', id => {
+      if (state.generating) return;
       refreshMountedMessages([id]);
       measureMounted();
       updateSpacers();
       checkWindowIntegrity();
     });
     on('MESSAGE_SWIPED', id => {
+      if (state.generating) return;
       refreshMountedMessages([id]);
       measureMounted();
       updateSpacers();
@@ -596,6 +668,8 @@ export function disable() { return disposeExtension(); }
     }
 
     bindEvents();
+    // Enabling in an already-running generation misses its STARTED event.
+    if (nativeGenerating()) { holdGeneration(); endGeneration(); }
     apply();
     diagnostics.record('enabled', diagnosticMetrics());
     updateStatusPanel();
@@ -617,6 +691,11 @@ export function disable() { return disposeExtension(); }
     }
     state.enabled = false;
     state.paused = false;
+    state.generating = false;
+    generationEventActive = false;
+    clearTimeout(generationResumeTimer); generationResumeTimer = 0;
+    for (const resolve of generationWaiters) resolve();
+    generationWaiters.clear();
     renderQueue.setSuspended(state.background);
     diagnostics.record('disabled');
     renderQueue.cancel();
@@ -696,6 +775,7 @@ export function disable() { return disposeExtension(); }
       enabled: state.enabled,
       paused: state.paused,
       background: state.background,
+      generating: state.generating,
       pendingReload: !!pendingReload,
       mounted: state.mounted,
       applying: state.applying || !!restoring || !!preparing,
@@ -847,7 +927,7 @@ export function disable() { return disposeExtension(); }
     const nodes = document.getElementsByTagName('*').length;
     const stateText = preparing ? '正在保存设置' : pendingReload ? '等待刷新' : state.paused ? '已暂停'
       : state.enableTimer && helperWaitStarted ? '等待助手'
-      : !enabled ? '已关闭' : state.background ? '后台暂停' : active ? '已开启' : '等待挂载';
+      : !enabled ? '已关闭' : state.background ? '后台暂停' : state.generating ? '生成中，暂缓回收' : active ? '已开启' : '等待挂载';
     const compatibility = document.getElementById('dom_window_compatibility');
     if (compatibility) {
       const check = helperLifecycle.inspect();
@@ -866,7 +946,7 @@ export function disable() { return disposeExtension(); }
       (state.lastRenderError ? `\n${state.lastRenderError}` : '');
 
     const badge = document.getElementById('dom_window_header_state');
-    if (badge) badge.textContent = state.paused || pendingReload || preparing || state.background ? stateText
+    if (badge) badge.textContent = state.paused || pendingReload || preparing || state.background || state.generating ? stateText
       : !enabled ? '已关闭' : active ? `已开启 · ${mounted} 层` : '等待挂载';
     const reloadButton = document.getElementById('dom_window_reload');
     if (reloadButton) reloadButton.hidden = !state.paused && !pendingReload;
