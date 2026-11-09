@@ -338,3 +338,47 @@ test('fresh storage reads see other writers and preserve in-page data when denie
   assert.equal(storage.getItem('value', { fresh: true }), 'second');
   assert.equal(storage.persistent, false);
 });
+
+test('trend samples are bounded, keep only counts and survive a reload', () => {
+  const { storage, values } = storageFixture();
+  let time = 1000;
+  const build = '本地预览-20261109-截断恢复与生成兜底';
+  const first = createDiagnostics({ storage, version: '0.4.3-compat.7', build, now: () => time });
+  first.checkpoint({ domNodes: 900, framesInPage: 2 });
+  assert.equal(first.snapshot().currentPage.samples, undefined, 'plain checkpoints do not add samples');
+  for (let i = 0; i < 45; i++) {
+    time += 30000;
+    first.checkpoint({ domNodes: 1000 + i, framesInPage: 3 + i, chatLength: 50, generating: i % 2 === 0,
+      enabled: true, running: 1, url: 'private-url', token: 'private-token' }, { sample: true });
+  }
+  const samples = first.snapshot().currentPage.samples;
+  assert.equal(samples.length, 30);
+  assert.equal(samples.at(-1).metrics.domNodes, 1044);
+  assert.equal(samples[0].metrics.domNodes, 1015);
+  assert.deepEqual(Object.keys(samples.at(-1).metrics).sort(), ['chatLength', 'domNodes', 'framesInPage', 'generating']);
+  assert.doesNotMatch(values.get(diagnosticKey), /private-/);
+  const previous = createDiagnostics({ storage, version: '0.4.3-compat.7', build, now: () => time + 1 }).snapshot().previousPage;
+  assert.equal(previous.build, build);
+  assert.equal(previous.samples.length, 30);
+  assert.equal(previous.samples.at(-1).metrics.domNodes, 1044);
+});
+
+test('saved samples are sanitized and capped when read back', () => {
+  const saved = { schema: 1, startedAt: 100, updatedAt: 200, metrics: {},
+    samples: [...Array.from({ length: 40 }, (_, i) => ({ at: 100 + i, metrics: { domNodes: i, url: 'private-url', enabled: true } })),
+      { at: -5, metrics: { domNodes: 1 } }, null, 'private-chat'] };
+  const { storage } = storageFixture({ [diagnosticKey]: JSON.stringify(saved) });
+  const previous = createDiagnostics({ storage, version: 'test', now: () => 300 }).snapshot().previousPage;
+  assert(previous.samples.length <= 30);
+  assert(previous.samples.every(sample => sample.at >= 0 && Object.keys(sample.metrics).every(name => name === 'domNodes')));
+  assert.doesNotMatch(JSON.stringify(previous), /private-/);
+});
+
+test('generation watchdog is a recorded event and domNodes is an allowed metric', () => {
+  const { storage } = storageFixture();
+  const diagnostics = createDiagnostics({ storage, version: 'test', now: () => 100 });
+  diagnostics.record('generation-watchdog', { generating: true, domNodes: 1234 });
+  const page = diagnostics.snapshot().currentPage;
+  assert.equal(page.lastEvent, 'generation-watchdog');
+  assert.equal(page.metrics.domNodes, 1234);
+});

@@ -138,7 +138,7 @@ try {
         await page.waitForFunction(() => !!window.finishHeldRefresh);
         await page.evaluate(async () => {
           window.fixtureGenerating = true;
-          await window.fixture.ctx.eventSource.emit('generation_started', 'continue', {}, false);
+          await window.fixture.ctx.eventSource.emit('generation_after_commands', 'continue', {}, false);
           window.finishHeldRefresh();
         });
         await page.waitForTimeout(300);
@@ -156,9 +156,9 @@ try {
       try {
         await page.evaluate(async () => {
           const source = window.fixture.ctx.eventSource;
-          await source.emit('generation_started', 'normal', {}, true);
+          await source.emit('generation_after_commands', 'normal', {}, true);
           await source.emit('generation_after_commands', 'quiet', {}, false);
-          await source.emit('generation_started', 'impersonate', {}, false);
+          await source.emit('generation_after_commands', 'impersonate', {}, false);
         });
         assert.equal((await state(page)).audit.generating, false);
         await page.evaluate(() => window.fixture.jumpTopSpacer(0.7)); await idle(page);

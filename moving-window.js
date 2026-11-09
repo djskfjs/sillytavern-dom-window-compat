@@ -1,4 +1,4 @@
-import { hasFrontendCandidate } from './render-queue.js?v=0.4.3-compat.6';
+import { hasFrontendCandidate } from './render-queue.js?v=0.4.3-compat.8';
 
 /** Continuous reading window; chat data and saved message IDs are untouched. */
 export function createMovingWindow({ state, config, getRoot, getChat, mountMessage,

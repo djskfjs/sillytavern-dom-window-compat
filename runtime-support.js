@@ -75,15 +75,24 @@ export function createDiagnostics({ storage, backupStorage, version, build, page
     'freeze', 'resume', 'render-timeout', 'render-error', 'window-error', 'reload-requested',
     'reload-deferred', 'settings-pending', 'helper-unavailable', 'generation-start', 'generation-end',
     'chat-changed', 'preset-selected', 'preset-before', 'preset-after', 'preset-complete', 'preset-sample',
-    'preset-settled', 'page-error', 'unhandled-rejection', 'extension-reloaded']);
+    'preset-settled', 'page-error', 'unhandled-rejection', 'extension-reloaded', 'generation-watchdog']);
   const presetCodes = new Set(['preset-selected', 'preset-before', 'preset-after', 'preset-complete', 'preset-sample', 'preset-settled']);
   const fields = new Set(['enabled', 'paused', 'background', 'chatLength', 'messagesInDom',
     'framesInChat', 'framesInPage', 'running', 'pending', 'stalled', 'persisted', 'generating',
-    'contextAvailable', 'chatRootConnected', 'framesOutsideChat', 'helperScriptFrames', 'helperMessageFrames', 'otherFrames']);
+    'contextAvailable', 'chatRootConnected', 'framesOutsideChat', 'helperScriptFrames', 'helperMessageFrames', 'otherFrames',
+    'domNodes']);
+  // Trend samples keep only counts that can grow during a long chat.
+  const sampleFields = new Set(['generating', 'background', 'chatLength', 'messagesInDom', 'framesInChat',
+    'framesInPage', 'helperScriptFrames', 'helperMessageFrames', 'domNodes']);
+  const SAMPLE_LIMIT = 30;
   const reloadReasons = new Set(['helper-configured', 'helper-restored', 'manual-recovery']);
   const clean = data => Object.fromEntries(Object.entries(data || {}).filter(([name, value]) =>
     fields.has(name) && (typeof value === 'boolean' || (typeof value === 'number' && Number.isFinite(value) && value >= 0))));
   const validTime = value => Number.isFinite(value) && value >= 0;
+  const cleanSamples = samples => Array.isArray(samples) ? samples.slice(-SAMPLE_LIMIT)
+    .filter(entry => entry && validTime(entry.at))
+    .map(entry => ({ at: entry.at, metrics: Object.fromEntries(Object.entries(clean(entry.metrics))
+      .filter(([name]) => sampleFields.has(name))) })) : [];
   // Keep the start of a preset transition even if delayed completion events
   // create more than one sampling batch. A trailing-only ring loses the before counts.
   const limitPresetEvents = events => events.length > 8 ? [...events.slice(0, 2), ...events.slice(-6)] : events;
@@ -99,9 +108,12 @@ export function createDiagnostics({ storage, backupStorage, version, build, page
     if (validId(saved.tabId)) previous.tabId = saved.tabId;
     if (validTime(saved.lastEventAt)) previous.lastEventAt = saved.lastEventAt;
     if (/^\d+\.\d+\.\d+(?:-[\w.]+)?$/.test(saved.version || '')) previous.version = saved.version;
-    if (['生成期间暂停前端回收', '本地预览-20261108-诊断复制与预设追踪', '本地预览-20261108-重载记录留存', '重载记录留存'].includes(saved.build)) previous.build = saved.build;
+    if (['生成期间暂停前端回收', '本地预览-20261108-诊断复制与预设追踪', '本地预览-20261108-重载记录留存', '重载记录留存',
+      '本地预览-20261109-截断恢复与生成兜底', '截断恢复与生成兜底'].includes(saved.build)) previous.build = saved.build;
     const events = cleanEvents(saved.events);
     if (events.length) previous.events = events;
+    const samples = cleanSamples(saved.samples);
+    if (samples.length) previous.samples = samples;
     const presetEvents = cleanEvents(saved.lastPreset?.events, presetCodes, 8);
     if (presetEvents.length && validTime(saved.lastPreset.startedAt)) {
       previous.lastPreset = { startedAt: saved.lastPreset.startedAt, events: presetEvents };
@@ -209,8 +221,10 @@ export function createDiagnostics({ storage, backupStorage, version, build, page
       }
       persist();
     },
-    checkpoint(metrics) {
-      current.updatedAt = now(); current.metrics = clean(metrics); persist();
+    checkpoint(metrics, { sample = false } = {}) {
+      current.updatedAt = now(); current.metrics = clean(metrics);
+      if (sample) current.samples = cleanSamples([...(current.samples || []), { at: current.updatedAt, metrics: current.metrics }]);
+      persist();
     },
     snapshot() { return JSON.parse(JSON.stringify({ recovery: recovery(), previousPage: previous,
       previousPages, unlinkedBrowserPages, currentPage: current })); },

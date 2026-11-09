@@ -1,5 +1,5 @@
 /**
- * DOM Window 0.4.3-compat.7 — browser compatibility build
+ * DOM Window 0.4.3-compat.8 — browser compatibility build
  *
  * 只窗口化 ST 的消息 DOM，不改 chat 数据。
  * - chat 数组保持完整，AI 上下文、存档、消息 ID 不变。
@@ -11,11 +11,11 @@
  * - STDOMWindow.getChat() 返回完整 chat
  * - STDOMWindow.getMessageElement(mesid) 按需挂载某一层
  */
-import { createRenderQueue } from './render-queue.js?v=0.4.3-compat.7';
-import { createMovingWindow } from './moving-window.js?v=0.4.3-compat.7';
-import { createHelperLifecycle } from './helper-lifecycle.js?v=0.4.3-compat.7';
-import { createHelperSetup } from './helper-setup.js?v=0.4.3-compat.7';
-import { createBrowserStorage, createDiagnostics, createDiagnosticId, getDiagnosticPageId, copyDiagnosticText, selectDiagnosticText } from './runtime-support.js?v=0.4.3-compat.7';
+import { createRenderQueue } from './render-queue.js?v=0.4.3-compat.8';
+import { createMovingWindow } from './moving-window.js?v=0.4.3-compat.8';
+import { createHelperLifecycle } from './helper-lifecycle.js?v=0.4.3-compat.8';
+import { createHelperSetup } from './helper-setup.js?v=0.4.3-compat.8';
+import { createBrowserStorage, createDiagnostics, createDiagnosticId, getDiagnosticPageId, copyDiagnosticText, selectDiagnosticText } from './runtime-support.js?v=0.4.3-compat.8';
 
 let disposeExtension = () => {};
 export function disable() { return disposeExtension(); }
@@ -23,8 +23,8 @@ export function disable() { return disposeExtension(); }
 (() => {
   'use strict';
 
-  const VERSION = '0.4.3-compat.7';
-  const BUILD = '重载记录留存';
+  const VERSION = '0.4.3-compat.8';
+  const BUILD = '截断恢复与生成兜底';
   const LOG = '[DOMWindow]';
   let extensionDisposed = false;
   let restoring = null;
@@ -39,6 +39,8 @@ export function disable() { return disposeExtension(); }
   let frozen = false;
   let generationResumeTimer = 0;
   let generationEventActive = false;
+  let generationIdleSince = 0;
+  let watchdogReleased = false;
   const generationWaiters = new Set();
   if (window.STDOMWindow) {
     console.warn(LOG, '检测到另一个 DOM Window 实例，兼容版未重复加载。请只启用一个版本。');
@@ -81,6 +83,11 @@ export function disable() { return disposeExtension(); }
     // 太小会让刚挂上的楼层立刻被回收，形成反复重建。
     trimFactor: 2,
     manageTruncation: false,
+    // The hold starts on GENERATION_AFTER_COMMANDS, so slash commands never freeze
+    // the window. ST 1.14 can still exit after that event (server ping, backend
+    // checks) without emitting GENERATION_ENDED. Release the
+    // hold once neither ST nor Helper reports a generation for this long.
+    generationWatchdogMs: 20000,
     debug: false,
   };
 
@@ -226,6 +233,7 @@ export function disable() { return disposeExtension(); }
 
   function holdGeneration() {
     clearTimeout(generationResumeTimer); generationResumeTimer = 0;
+    generationIdleSince = 0; watchdogReleased = false;
     if (state.generating) return;
     state.generating = true;
     clearTimeout(state.applyTimer); state.applyTimer = 0;
@@ -246,6 +254,35 @@ export function disable() { return disposeExtension(); }
     // Stop/error events can precede the final message render. Let that event
     // chain finish, and let a following group/tool generation keep the hold.
     generationResumeTimer = setTimeout(finishGeneration, 200);
+  }
+
+  function onGenerationEnded() {
+    watchdogReleased = false;
+    endGeneration();
+  }
+
+  // ST 1.14 sets body[data-generating] only once the request really starts
+  // (deactivateSendButtons) and removes it when the send buttons return.
+  function nativeBusy() {
+    return nativeGenerating() || document.body?.dataset?.generating === 'true';
+  }
+
+  function checkGenerationWatchdog(now = Date.now()) {
+    if (extensionDisposed || !state.enabled) { generationIdleSince = 0; return; }
+    if (!state.generating) {
+      // A request that only became visible after a long prompt build: hold again.
+      if (watchdogReleased && nativeBusy()) {
+        watchdogReleased = false; generationEventActive = true; holdGeneration();
+      }
+      return;
+    }
+    if (generationResumeTimer || nativeBusy()) { generationIdleSince = 0; return; }
+    generationIdleSince ||= now;
+    const limit = Number(config.generationWatchdogMs);
+    if (!Number.isFinite(limit) || limit <= 0 || now - generationIdleSince < limit) return;
+    generationIdleSince = 0; watchdogReleased = true;
+    diagnostics.record('generation-watchdog', diagnosticMetrics());
+    endGeneration();
   }
 
   function finishGeneration() {
@@ -289,6 +326,7 @@ export function disable() { return disposeExtension(); }
       chatLength: ctx?.chat?.length || 0, messagesInDom: root?.querySelectorAll(':scope > .mes').length || 0,
       framesInChat, framesInPage: frames.length, framesOutsideChat: frames.length - framesInChat,
       helperScriptFrames, helperMessageFrames, otherFrames: frames.length - helperScriptFrames - helperMessageFrames,
+      domNodes: document.getElementsByTagName('*').length,
       running: queue.running, pending: queue.pending, stalled: queue.stalled };
   }
 
@@ -351,6 +389,17 @@ export function disable() { return disposeExtension(); }
       const event = types[key] || fallback;
       const handler = () => safe(() => code === 'chat-changed'
         ? diagnostics.record(code, diagnosticMetrics()) : recordPreset(code), 'diagnostic-event');
+      source.on(event, handler); diagnosticListeners.push({ event, handler });
+    }
+    // With the window open, holdGeneration/finishGeneration record these.
+    // Closed, they still show whether a reload happened during a reply.
+    for (const [key, code] of [['GENERATION_STARTED', 'generation-start'],
+      ['GENERATION_ENDED', 'generation-end'], ['GENERATION_STOPPED', 'generation-end']]) {
+      const event = types[key] || FALLBACK_EVENTS[key];
+      const handler = (_type, _options, dryRun) => safe(() => {
+        if (state.enabled || extensionDisposed || (code === 'generation-start' && dryRun === true)) return;
+        diagnostics.record(code, diagnosticMetrics());
+      }, 'diagnostic-generation');
       source.on(event, handler); diagnosticListeners.push({ event, handler });
     }
   }
@@ -616,10 +665,9 @@ export function disable() { return disposeExtension(); }
     });
     on('MESSAGE_DELETED', () => scheduleApply(250));
     on('MORE_MESSAGES_LOADED', () => scheduleApply(250));
-    on('GENERATION_STARTED', beginGeneration);
     on('GENERATION_AFTER_COMMANDS', beginGeneration);
-    on('GENERATION_ENDED', endGeneration);
-    on('GENERATION_STOPPED', endGeneration);
+    on('GENERATION_ENDED', onGenerationEnded);
+    on('GENERATION_STOPPED', onGenerationEnded);
     on('MESSAGE_UPDATED', id => {
       if (state.generating) return;
       refreshMountedMessages([id]);
@@ -731,10 +779,13 @@ export function disable() { return disposeExtension(); }
 
     if (config.manageTruncation) {
       const current = ctx.powerUserSettings?.chat_truncation ?? null;
-      state.originalTruncation = current;
-      if (current != null && storage.getItem(TRUNCATION_KEY) == null) {
-        storage.setItem(TRUNCATION_KEY, String(current));
-      }
+      // A stored value means an earlier page changed truncation and never got
+      // to restore it (for example an automatic reload). The live value is then
+      // this extension's own setting, not the user's original.
+      const stored = storage.getItem(TRUNCATION_KEY);
+      const saved = stored != null && stored !== '' && Number.isFinite(Number(stored)) ? Number(stored) : null;
+      state.originalTruncation = saved ?? current;
+      if (saved == null && current != null) storage.setItem(TRUNCATION_KEY, String(current));
       if (ctx.powerUserSettings) {
         ctx.powerUserSettings.chat_truncation = config.maxWindow + 10;
         ctx.saveSettingsDebounced?.();
@@ -768,6 +819,7 @@ export function disable() { return disposeExtension(); }
     state.generating = false;
     generationEventActive = false;
     clearTimeout(generationResumeTimer); generationResumeTimer = 0;
+    generationIdleSince = 0; watchdogReleased = false;
     for (const resolve of generationWaiters) resolve();
     generationWaiters.clear();
     renderQueue.setSuspended(state.background);
@@ -916,6 +968,11 @@ export function disable() { return disposeExtension(); }
       const html = await response.text();
       if (extensionDisposed) return;
       container.insertAdjacentHTML('beforeend', html);
+      // settings.html is fetched without cache; show the build of the script
+      // that is actually running, so a cached index.js cannot pass unnoticed.
+      const buildLabel = document.getElementById('dom_window_build');
+      if (buildLabel) buildLabel.textContent = BUILD.startsWith('本地预览-')
+        ? BUILD.replace(/^本地预览-(\d{4})(\d{2})(\d{2})-/, '本地预览 · $1-$2-$3 · ') : `2026-11-09 · ${BUILD}`;
 
       const checkbox = document.getElementById('dom_window_autostart');
       if (!checkbox) return;
@@ -1070,11 +1127,16 @@ export function disable() { return disposeExtension(); }
     if (restoreButton) { restoreButton.hidden = state.enabled || isAutoEnabled() || !helperSetup.hasBackup(); restoreButton.disabled = !!preparing; }
   }
 
+  let lastSample = 0;
   const statusInterval = setInterval(() => {
     bindDiagnosticEvents();
+    safe(() => checkGenerationWatchdog(), 'generation-watchdog');
     if (!document.hidden) updateStatusPanel();
     if (!document.hidden && Date.now() - lastCheckpoint >= 10000) {
-      lastCheckpoint = Date.now(); diagnostics.checkpoint(diagnosticMetrics());
+      // Every third checkpoint also keeps a small trend sample (30 at most).
+      const sample = Date.now() - lastSample >= 30000;
+      lastCheckpoint = Date.now(); if (sample) lastSample = lastCheckpoint;
+      diagnostics.checkpoint(diagnosticMetrics(), { sample });
     }
   }, 1000);
   updateStatusPanel();

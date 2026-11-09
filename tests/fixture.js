@@ -25,6 +25,8 @@ const ctx = {
   saveSettingsDebounced() { window.stats.settingSaves++; },
   saveChat() { throw Error('扩展不应保存或修改测试聊天'); },
 };
+// Models ST keeping a truncation value changed by an earlier page.
+if (params.has('truncation')) ctx.powerUserSettings.chat_truncation = Number(params.get('truncation'));
 // Helper has its own live reactive copy; changing extensionSettings alone does
 // not change its renderer until the next page load.
 const liveRenderSettings = structuredClone(ctx.extensionSettings.tavern_helper.render);
