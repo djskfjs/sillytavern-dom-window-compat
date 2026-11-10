@@ -32,7 +32,8 @@ export function selectDiagnosticText(output) {
     output.select();
     // iOS does not consistently select readonly textareas with select() alone.
     output.setSelectionRange(0, output.value.length);
-    return true;
+    return output.value.length > 0 && output.ownerDocument.activeElement === output
+      && output.selectionStart === 0 && output.selectionEnd === output.value.length;
   } catch { return false; }
 }
 
@@ -109,7 +110,8 @@ export function createDiagnostics({ storage, backupStorage, version, build, page
     if (validTime(saved.lastEventAt)) previous.lastEventAt = saved.lastEventAt;
     if (/^\d+\.\d+\.\d+(?:-[\w.]+)?$/.test(saved.version || '')) previous.version = saved.version;
     if (['生成期间暂停前端回收', '本地预览-20261108-诊断复制与预设追踪', '本地预览-20261108-重载记录留存', '重载记录留存',
-      '本地预览-20261109-截断恢复与生成兜底', '截断恢复与生成兜底'].includes(saved.build)) previous.build = saved.build;
+      '本地预览-20261109-截断恢复与生成兜底', '截断恢复与生成兜底',
+      '旧楼层引用释放与全选校验'].includes(saved.build)) previous.build = saved.build;
     const events = cleanEvents(saved.events);
     if (events.length) previous.events = events;
     const samples = cleanSamples(saved.samples);

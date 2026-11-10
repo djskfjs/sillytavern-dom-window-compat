@@ -1,4 +1,4 @@
-import { hasFrontendCandidate } from './render-queue.js?v=0.4.3-compat.8';
+import { hasFrontendCandidate } from './render-queue.js?v=0.4.3-compat.9';
 
 /** Continuous reading window; chat data and saved message IDs are untouched. */
 export function createMovingWindow({ state, config, getRoot, getChat, mountMessage,
@@ -110,6 +110,16 @@ export function createMovingWindow({ state, config, getRoot, getChat, mountMessa
     else element.style.removeProperty('min-height');
     reservations.delete(element);
   }
+  function pruneDetachedReservations() {
+    const chat = root();
+    // A chat switch or external render can remove rows before changeRange sees
+    // them. Cancelled queue entries never reach afterRefresh to release these.
+    for (const element of reservations.keys()) {
+      if (element.isConnected && chat?.contains(element)) continue;
+      releaseHeight(element);
+      settledDuringTransition.delete(element);
+    }
+  }
   function afterRefresh(item, anchor) {
     if (!state.enabled) return;
     if (changing || !running()) { settledDuringTransition.add(item.element); return; }
@@ -201,6 +211,7 @@ export function createMovingWindow({ state, config, getRoot, getChat, mountMessa
     return null;
   }
   async function changeRange(next) {
+    pruneDetachedReservations();
     const chat = root(), data = getChat(), epoch = generation;
     if (!chat || !data.length) return;
     const compatibility = lifecycle.inspect?.();
@@ -304,6 +315,7 @@ export function createMovingWindow({ state, config, getRoot, getChat, mountMessa
       Array.from({ length: state.end - state.start + 1 }, (_, n) => state.start + n).every(id => elementOf(id));
   }
   function apply(force = false) {
+    pruneDetachedReservations();
     if (!running() || !getChat().length || (!force && matches())) return false;
     generation++; target = null;
     if (!originalScrollAnchor) {

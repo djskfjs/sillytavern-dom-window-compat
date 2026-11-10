@@ -209,7 +209,7 @@ try {
       assert(!recorded.afterDryRun.includes('generation-start'), 'dry runs are not recorded');
       assert.deepEqual(recorded.events.slice(-2), ['generation-start', 'generation-end']);
       assert(recorded.domNodes > 100);
-      assert.match(recorded.build, /2026-11-09 · 截断恢复与生成兜底/);
+      assert.match(recorded.build, /2026-11-10 · 旧楼层引用释放与全选校验/);
       assert.deepEqual(errors, []);
       return recorded;
     } finally { await context.close(); }

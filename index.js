@@ -1,5 +1,5 @@
 /**
- * DOM Window 0.4.3-compat.8 — browser compatibility build
+ * DOM Window 0.4.3-compat.9 — browser compatibility build
  *
  * 只窗口化 ST 的消息 DOM，不改 chat 数据。
  * - chat 数组保持完整，AI 上下文、存档、消息 ID 不变。
@@ -11,11 +11,11 @@
  * - STDOMWindow.getChat() 返回完整 chat
  * - STDOMWindow.getMessageElement(mesid) 按需挂载某一层
  */
-import { createRenderQueue } from './render-queue.js?v=0.4.3-compat.8';
-import { createMovingWindow } from './moving-window.js?v=0.4.3-compat.8';
-import { createHelperLifecycle } from './helper-lifecycle.js?v=0.4.3-compat.8';
-import { createHelperSetup } from './helper-setup.js?v=0.4.3-compat.8';
-import { createBrowserStorage, createDiagnostics, createDiagnosticId, getDiagnosticPageId, copyDiagnosticText, selectDiagnosticText } from './runtime-support.js?v=0.4.3-compat.8';
+import { createRenderQueue } from './render-queue.js?v=0.4.3-compat.9';
+import { createMovingWindow } from './moving-window.js?v=0.4.3-compat.9';
+import { createHelperLifecycle } from './helper-lifecycle.js?v=0.4.3-compat.9';
+import { createHelperSetup } from './helper-setup.js?v=0.4.3-compat.9';
+import { createBrowserStorage, createDiagnostics, createDiagnosticId, getDiagnosticPageId, copyDiagnosticText, selectDiagnosticText } from './runtime-support.js?v=0.4.3-compat.9';
 
 let disposeExtension = () => {};
 export function disable() { return disposeExtension(); }
@@ -23,8 +23,8 @@ export function disable() { return disposeExtension(); }
 (() => {
   'use strict';
 
-  const VERSION = '0.4.3-compat.8';
-  const BUILD = '截断恢复与生成兜底';
+  const VERSION = '0.4.3-compat.9';
+  const BUILD = '旧楼层引用释放与全选校验';
   const LOG = '[DOMWindow]';
   let extensionDisposed = false;
   let restoring = null;
@@ -972,7 +972,7 @@ export function disable() { return disposeExtension(); }
       // that is actually running, so a cached index.js cannot pass unnoticed.
       const buildLabel = document.getElementById('dom_window_build');
       if (buildLabel) buildLabel.textContent = BUILD.startsWith('本地预览-')
-        ? BUILD.replace(/^本地预览-(\d{4})(\d{2})(\d{2})-/, '本地预览 · $1-$2-$3 · ') : `2026-11-09 · ${BUILD}`;
+        ? BUILD.replace(/^本地预览-(\d{4})(\d{2})(\d{2})-/, '本地预览 · $1-$2-$3 · ') : `2026-11-10 · ${BUILD}`;
 
       const checkbox = document.getElementById('dom_window_autostart');
       if (!checkbox) return;

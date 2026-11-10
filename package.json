@@ -1,8 +1,8 @@
 {
   "name": "dom-window-compat-test",
-  "version": "0.4.3-compat.8",
+  "version": "0.4.3-compat.9",
   "private": true,
   "type": "module",
-  "scripts": { "test": "node --test tests/*.test.mjs && node tests/browser.mjs && node tests/scroll-regressions.mjs && node tests/compat-safety.mjs && node tests/generation-safety.mjs && node tests/diagnostics-browser.mjs", "test:scroll": "node tests/scroll-regressions.mjs", "test:safety": "node tests/compat-safety.mjs", "test:generation": "node tests/generation-safety.mjs", "test:diagnostics": "node tests/diagnostics-browser.mjs" },
+  "scripts": { "test": "node --test tests/*.test.mjs && node tests/browser.mjs && node tests/scroll-regressions.mjs && node tests/compat-safety.mjs && node tests/generation-safety.mjs && node tests/diagnostics-browser.mjs && node tests/memory-lifecycle.mjs", "test:scroll": "node tests/scroll-regressions.mjs", "test:safety": "node tests/compat-safety.mjs", "test:generation": "node tests/generation-safety.mjs", "test:diagnostics": "node tests/diagnostics-browser.mjs", "test:memory": "node tests/memory-lifecycle.mjs" },
   "devDependencies": { "playwright": "^1.55.0" }
 }
