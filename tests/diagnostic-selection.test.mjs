@@ -69,49 +69,111 @@ test('selection exceptions return failure', async t => {
   }
 });
 
-test('legacy copy runs synchronously after a verified complete selection', async () => {
-  const output = textareaFixture();
-  let copied = null;
-  output.ownerDocument.execCommand = command => {
+function copyFixture(value = '{"format":3,"message":"诊断信息"}') {
+  const output = textareaFixture(value);
+  const created = [];
+  const documentObject = output.ownerDocument;
+  documentObject.createElement = tag => {
+    const field = { tagName: tag.toUpperCase(), ownerDocument: documentObject, value: '', attributes: {}, style: { cssText: '' },
+      selectionStart: 0, selectionEnd: 0, removed: false,
+      setAttribute(name, v) { this.attributes[name] = String(v); },
+      hasAttribute(name) { return name in this.attributes; },
+      focus() { documentObject.activeElement = this; },
+      select() { this.selectionStart = 0; this.selectionEnd = this.value.length; },
+      setSelectionRange(start, end) { this.selectionStart = start; this.selectionEnd = end; },
+      remove() { this.removed = true; } };
+    created.push(field);
+    return field;
+  };
+  documentObject.body = { appendChild() {} };
+  return { output, created, documentObject };
+}
+
+test('copies through a temporary field, never the readonly report', async () => {
+  const { output, created, documentObject } = copyFixture();
+  let copied = null, source = null;
+  documentObject.execCommand = command => {
     assert.equal(command, 'copy');
-    copied = output.value.slice(output.selectionStart, output.selectionEnd);
+    source = documentObject.activeElement;
+    copied = source.value.slice(source.selectionStart, source.selectionEnd);
     return true;
   };
-  const result = copyDiagnosticText(output, {});
+  assert.equal(await copyDiagnosticText(output, {}), true);
+  assert.equal(source, created[0], 'the copy source is the temporary field');
   assert.equal(copied, output.value);
-  assert.equal(await result, true);
+  assert.equal(created[0].removed, true, 'the temporary field is removed');
 });
 
-test('invalid selections never invoke legacy copy on an unrelated selection', async t => {
+test('a refused field copy falls back to the Clipboard API', async () => {
+  const { output, created, documentObject } = copyFixture();
+  documentObject.execCommand = () => false;
+  let written = null;
+  const result = copyDiagnosticText(output, { clipboard: { writeText(text) { written = text; return Promise.resolve(); } } });
+  assert.equal(await result, true);
+  assert.equal(written, output.value);
+  assert.equal(created[0].removed, true);
+});
+
+test('missing or empty reports are never copied', async () => {
+  const { output, documentObject } = copyFixture('');
+  let calls = 0;
+  documentObject.execCommand = () => { calls++; return true; };
+  assert.equal(await copyDiagnosticText(output, {}), false);
+  assert.equal(await copyDiagnosticText(null, {}), false);
+  assert.equal(calls, 0);
+});
+
+test('invalid temporary selections skip legacy copy and still try the Clipboard API synchronously', async t => {
   const failures = {
-    'silent no-op': output => { output.select = () => {}; output.setSelectionRange = () => {}; },
-    'lost focus': output => { output.focus = () => {}; },
-    'empty report': output => { output.value = ''; },
-    'selection exception': output => { output.select = () => { throw new Error('Unavailable'); }; },
+    'silent no-op': field => { field.select = () => {}; field.setSelectionRange = () => {}; },
+    'lost focus': field => { field.focus = () => {}; },
+    'partial selection': field => { field.setSelectionRange = () => { field.selectionEnd = 1; }; },
+    'selection exception': field => { field.select = () => { throw new Error('Unavailable'); }; },
   };
   for (const [name, fail] of Object.entries(failures)) {
     await t.test(name, async () => {
-      const output = textareaFixture();
-      fail(output);
-      let legacyCalls = 0;
-      output.ownerDocument.execCommand = () => { legacyCalls++; return true; };
+      const { output, created, documentObject } = copyFixture();
+      const createElement = documentObject.createElement;
+      documentObject.createElement = tag => { const field = createElement(tag); fail(field); return field; };
+      let calls = 0, written = null;
+      documentObject.execCommand = () => { calls++; return true; };
       assert.equal(await copyDiagnosticText(output, {}), false);
-      assert.equal(legacyCalls, 0);
+      const result = copyDiagnosticText(output, { clipboard: {
+        writeText(text) { written = text; return Promise.resolve(); },
+      } });
+      assert.equal(written, output.value, 'Clipboard API runs before the first await');
+      assert.equal(calls, 0, 'an unverified selection is never copied');
+      assert.equal(await result, true);
+      assert(created.every(field => field.removed), 'temporary fields are removed on either path');
     });
   }
 });
 
-test('Clipboard API remains available synchronously when selection silently fails', async () => {
-  const output = textareaFixture();
-  output.select = () => {};
-  output.setSelectionRange = () => {};
-  let legacyCalls = 0;
-  output.ownerDocument.execCommand = () => { legacyCalls++; return true; };
+test('no available clipboard reports failure without throwing', async () => {
+  const { output, documentObject } = copyFixture();
+  documentObject.execCommand = () => false;
+  assert.equal(await copyDiagnosticText(output, {}), false);
+  assert.equal(await copyDiagnosticText(output, { clipboard: { writeText: () => Promise.reject(new Error('Denied')) } }), false);
+  assert.equal(await copyDiagnosticText(output, { clipboard: { writeText: () => { throw new Error('Denied'); } } }), false);
+  assert.equal(await copyDiagnosticText(output, { get clipboard() { throw new Error('Denied'); } }), false);
+});
+
+test('a document without a usable body still tries the Clipboard API', async () => {
+  const { output, documentObject } = copyFixture();
+  documentObject.body = { appendChild() { throw new Error('No body'); } };
+  documentObject.execCommand = () => { throw new Error('Must not copy without a field'); };
   let written = null;
-  const result = copyDiagnosticText(output, { clipboard: {
-    writeText(text) { written = text; return Promise.resolve(); },
-  } });
-  assert.equal(written, output.value);
-  assert.equal(legacyCalls, 0);
+  const result = copyDiagnosticText(output, { clipboard: { writeText(text) { written = text; return Promise.resolve(); } } });
   assert.equal(await result, true);
+  assert.equal(written, output.value);
+});
+
+test('a failed copy leaves the report selected for manual copying', async () => {
+  const { output, documentObject } = copyFixture();
+  documentObject.execCommand = () => false;
+  assert.equal(await copyDiagnosticText(output, {}), false);
+  assert.equal(output.hidden, false);
+  assert.equal(documentObject.activeElement, output);
+  assert.equal(output.selectionStart, 0);
+  assert.equal(output.selectionEnd, output.value.length);
 });

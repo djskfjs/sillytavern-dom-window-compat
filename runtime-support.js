@@ -37,12 +37,34 @@ export function selectDiagnosticText(output) {
   } catch { return false; }
 }
 
+// Some iOS Safari versions do not copy a selected readonly textarea reliably,
+// and the Clipboard API needs a secure context. Try a temporary editable field
+// during the tap, retaining the complete-selection check before legacy copying.
+export function copyTextThroughField(text, documentObject) {
+  let field, copied = false;
+  try {
+    field = documentObject.createElement('textarea');
+    field.value = text;
+    field.setAttribute('aria-hidden', 'true');
+    field.setAttribute('tabindex', '-1');
+    field.setAttribute('data-dom-window-copy', '1');
+    field.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;margin:0;padding:0;border:0;opacity:0;font-size:16px;';
+    documentObject.body.appendChild(field);
+    if (selectDiagnosticText(field)) copied = documentObject.execCommand('copy') === true;
+  } catch { copied = false; }
+  finally { field?.remove(); }
+  return copied;
+}
+
 export async function copyDiagnosticText(output, navigatorObject = globalThis.navigator) {
-  if (!output) return false;
-  const selected = selectDiagnosticText(output);
+  if (!output || !output.value) return false;
+  const documentObject = output.ownerDocument;
   // Keep the fallback inside the original tap. Waiting for a rejected Clipboard
   // promise first can lose Safari's transient user activation.
-  try { if (selected && output.ownerDocument.execCommand('copy')) return true; } catch {}
+  if (copyTextThroughField(output.value, documentObject)) return true;
+  // Copy failed: leave the visible report selected so it can still be copied by
+  // hand, then try the Clipboard API which some browsers allow after a field copy.
+  selectDiagnosticText(output);
   let timer;
   try {
     const clipboard = navigatorObject?.clipboard;
@@ -111,7 +133,7 @@ export function createDiagnostics({ storage, backupStorage, version, build, page
     if (/^\d+\.\d+\.\d+(?:-[\w.]+)?$/.test(saved.version || '')) previous.version = saved.version;
     if (['生成期间暂停前端回收', '本地预览-20261108-诊断复制与预设追踪', '本地预览-20261108-重载记录留存', '重载记录留存',
       '本地预览-20261109-截断恢复与生成兜底', '截断恢复与生成兜底',
-      '旧楼层引用释放与全选校验'].includes(saved.build)) previous.build = saved.build;
+      '旧楼层引用释放与全选校验', '本地预览-20261111-助手版本与复制修复', '助手版本与复制修复'].includes(saved.build)) previous.build = saved.build;
     const events = cleanEvents(saved.events);
     if (events.length) previous.events = events;
     const samples = cleanSamples(saved.samples);

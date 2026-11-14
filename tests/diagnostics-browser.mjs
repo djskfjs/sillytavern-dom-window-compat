@@ -57,7 +57,9 @@ try {
         window.copyCalls = [];
         document.execCommand = command => {
           window.copyCalls.push(command);
-          window.copied = document.querySelector('#dom_window_diagnostics_output').value;
+          const source = document.activeElement;
+          window.copied = source?.value ?? null;
+          window.copySource = source?.hasAttribute?.('data-dom-window-copy') ? 'field' : (source?.id || source?.tagName || null);
           return mode === 'legacy';
         };
         Object.defineProperty(navigator, 'clipboard', { configurable: true, get() {
@@ -76,6 +78,7 @@ try {
       assert.match(feedback, ['legacy', 'modern'].includes(mode) ? /已复制/ : /未允许自动复制/);
       const calls = await page.evaluate(() => window.copyCalls);
       assert.equal(calls[0], 'copy', 'fallback runs synchronously during the click');
+      assert.equal(await page.evaluate(() => window.copySource), 'field', 'the readonly report field is never the copy source');
       if (mode === 'legacy') assert.deepEqual(calls, ['copy']);
       await page.locator('#dom_window_diagnostics_select').click();
       const selection = await page.locator('#dom_window_diagnostics_output').evaluate(el => ({
@@ -99,11 +102,12 @@ try {
       }
     });
   }
-  await run('real browser copy event receives the selected report', async page => {
+  await run('real browser copy event carries the whole report from the temporary field', async page => {
     await page.evaluate(() => {
       document.addEventListener('copy', event => {
-        const output = document.querySelector('#dom_window_diagnostics_output');
-        window.copyEventText = output.value.slice(output.selectionStart, output.selectionEnd);
+        const field = event.target;
+        window.copyEventText = field.value.slice(field.selectionStart, field.selectionEnd);
+        window.copyEventSource = field.id || (field.hasAttribute?.('data-dom-window-copy') ? 'field' : field.tagName);
         event.clipboardData.setData('text/plain', window.copyEventText);
         event.preventDefault();
       });
@@ -112,11 +116,26 @@ try {
     await page.waitForFunction(() => !document.querySelector('#dom_window_diagnostics').disabled);
     assert.match(await page.locator('#dom_window_diagnostics_feedback').textContent(), /已复制/);
     assert.equal(await page.evaluate(() => window.copyEventText), await page.locator('#dom_window_diagnostics_output').inputValue());
+    assert.equal(await page.evaluate(() => window.copyEventSource), 'field');
   });
-  await run('modern clipboard remains usable when text selection throws', async page => {
+  await run('failed copy leaves the report selected and no temporary field behind', async page => {
+    await page.evaluate(() => {
+      document.execCommand = () => false;
+      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined });
+    });
+    await page.locator('#dom_window_diagnostics').click();
+    await page.waitForFunction(() => !document.querySelector('#dom_window_diagnostics').disabled);
+    assert.match(await page.locator('#dom_window_diagnostics_feedback').textContent(), /未允许自动复制/);
+    assert.deepEqual(await page.evaluate(() => {
+      const output = document.querySelector('#dom_window_diagnostics_output');
+      return { fields: document.querySelectorAll('[data-dom-window-copy]').length, hidden: output.hidden,
+        active: document.activeElement === output, start: output.selectionStart, end: output.selectionEnd, length: output.value.length };
+    }), { fields: 0, hidden: false, active: true, start: 0, end: await page.locator('#dom_window_diagnostics_output').evaluate(el => el.value.length), length: await page.locator('#dom_window_diagnostics_output').evaluate(el => el.value.length) });
+  });
+  await run('modern clipboard remains usable when text selection and field copy fail', async page => {
     await page.evaluate(() => {
       document.querySelector('#dom_window_diagnostics_output').setSelectionRange = () => { throw new Error('Selection unavailable'); };
-      document.execCommand = () => { throw new Error('Must not copy an unknown selection'); };
+      document.execCommand = () => { throw new Error('Field copy unavailable'); };
       Object.defineProperty(navigator, 'clipboard', { configurable: true, value: {
         writeText(text) { window.modernCopied = text; return Promise.resolve(); },
       } });

@@ -1,3 +1,4 @@
+import { isSupportedHelperVersion, readHelperVersion, MIN_HELPER_VERSION } from './helper-lifecycle.js';
 /** Persist only the two compatibility settings; Helper reads them on reload. */
 export const HELPER_BACKUP_KEY = 'STDOMWindow_helper_backup';
 const TARGET = Object.freeze({ depth: 0, allow_streaming: false });
@@ -15,14 +16,14 @@ export function createHelperSetup({ getHelper, getContext, owner, saveTimeoutMs 
     if (Object.keys(records).length) all[HELPER_BACKUP_KEY] = records; else delete all[HELPER_BACKUP_KEY];
   }
   function validBackup(value) {
-    return value?.schema === 1 && value.helperVersion === '4.12.0' && value.original && !Array.isArray(value.original) &&
+    return value?.schema === 1 && isSupportedHelperVersion(value.helperVersion) && value.original && !Array.isArray(value.original) &&
       Object.keys(value.original).length > 0 &&
       Object.entries(value.original).every(([key, v]) => key === 'depth'
         ? Number.isFinite(v) && v >= 0 : key === 'allow_streaming' && typeof v === 'boolean');
   }
   function checkAccess() {
     const helper = getHelper(), ctx = getContext();
-    if (helper?.getTavernHelperVersion?.() !== '4.12.0') throw new Error('当前助手版本尚未适配，未修改助手设置。');
+    if (!isSupportedHelperVersion(readHelperVersion(helper))) throw new Error(`需要酒馆助手 ${MIN_HELPER_VERSION} 或更高版本，未修改助手设置。`);
     if (helper.builtin?.duringGenerating?.()) throw new Error('请等本次回复生成结束，再开启或关闭；自动适配需要刷新页面。');
     const source = ctx?.eventSource;
     const event = (ctx?.event_types || ctx?.eventTypes)?.SETTINGS_UPDATED;
@@ -73,7 +74,7 @@ export function createHelperSetup({ getHelper, getContext, owner, saveTimeoutMs 
         original[key] = render[key]; changed[key] = render[key];
       }
       if (!Object.keys(changed).length) return false;
-      const nextBackup = { schema: 1, helperVersion: '4.12.0', original };
+      const nextBackup = { schema: 1, helperVersion: readHelperVersion(access.helper) || MIN_HELPER_VERSION, original };
       try {
         putBackup(all, nextBackup);
         for (const key of Object.keys(changed)) render[key] = TARGET[key];

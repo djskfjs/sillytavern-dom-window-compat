@@ -24,7 +24,7 @@ export function disable() { return disposeExtension(); }
   'use strict';
 
   const VERSION = '0.4.3-compat.9';
-  const BUILD = '旧楼层引用释放与全选校验';
+  const BUILD = '助手版本与复制修复';
   const LOG = '[DOMWindow]';
   let extensionDisposed = false;
   let restoring = null;
@@ -972,7 +972,7 @@ export function disable() { return disposeExtension(); }
       // that is actually running, so a cached index.js cannot pass unnoticed.
       const buildLabel = document.getElementById('dom_window_build');
       if (buildLabel) buildLabel.textContent = BUILD.startsWith('本地预览-')
-        ? BUILD.replace(/^本地预览-(\d{4})(\d{2})(\d{2})-/, '本地预览 · $1-$2-$3 · ') : `2026-11-10 · ${BUILD}`;
+        ? BUILD.replace(/^本地预览-(\d{4})(\d{2})(\d{2})-/, '本地预览 · $1-$2-$3 · ') : `2026-11-14 · ${BUILD}`;
 
       const checkbox = document.getElementById('dom_window_autostart');
       if (!checkbox) return;

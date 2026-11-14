@@ -50,9 +50,9 @@ test('repeated activation is idempotent and keeps the original restore point', a
   assert.equal(first, second); await first; assert.equal(await f.setup.configure(), false);
   assert.equal(f.saves, 1); assert.equal(f.ctx.extensionSettings[HELPER_BACKUP_KEY]['test-device'].original.depth, 8);
 });
-test('unsupported helper does not change settings or create a backup', async () => {
-  const f = fixture(), before = structuredClone(f.ctx.extensionSettings); f.version = '9.9.9';
-  await assert.rejects(f.setup.configure(), /尚未适配/); assert.deepEqual(f.ctx.extensionSettings, before); assert.equal(f.saves, 0);
+test('a helper below 4.11.0 does not change settings or create a backup', async () => {
+  const f = fixture(), before = structuredClone(f.ctx.extensionSettings); f.version = '4.10.9';
+  await assert.rejects(f.setup.configure(), /4\.11\.0 或更高版本/); assert.deepEqual(f.ctx.extensionSettings, before); assert.equal(f.saves, 0);
 });
 test('ongoing generation is not interrupted by automatic reload setup', async () => {
   const f = fixture(), before = structuredClone(f.ctx.extensionSettings); f.generating = true;
@@ -63,11 +63,20 @@ test('malformed existing backup is never overwritten', async () => {
   const before = structuredClone(f.ctx.extensionSettings);
   await assert.rejects(f.setup.configure(), /备份无法识别/); assert.deepEqual(f.ctx.extensionSettings, before);
 });
-test('all required adjustments are reported together and unknown versions identify themselves', () => {
+test('every helper version from 4.11.0 up reports the same adjustments, older ones identify themselves', () => {
   const f = fixture(); const lifecycle = createHelperLifecycle({ getHelper: () => f.helper, getContext: () => f.ctx });
-  assert.deepEqual(lifecycle.inspect().adjustments, ['渲染深度设为 0', '关闭流式渲染']);
-  f.version = '4.11.0'; assert.match(lifecycle.inspect().reason, /4\.11\.0/);
-  assert.equal(lifecycle.inspect().canConfigure, undefined);
+  for (const version of ['4.11.0', '4.11.9', '4.12.0', '4.12.1', '4.13.0']) {
+    f.version = version;
+    const check = lifecycle.inspect();
+    assert.deepEqual(check.adjustments, ['渲染深度设为 0', '关闭流式渲染'], version);
+    assert.equal(check.canConfigure, true, version);
+  }
+  for (const version of ['4.10.9', '4.9.0', '3.12.0', 'abc', '']) {
+    f.version = version;
+    assert.equal(lifecycle.inspect().ok, false, `rejects ${version}`);
+    assert.equal(lifecycle.inspect().canConfigure, undefined, version);
+    assert.match(lifecycle.inspect().reason, version ? new RegExp(version.replace(/\./g, '\\.')) : /版本未读到/);
+  }
 });
 test('another browser cannot restore or clear this browser restore point', async () => {
   const f = fixture(); await f.setup.configure(); const other = f.create('other-browser');
@@ -100,19 +109,33 @@ test('a missing helper is text-only only when render settings are absent or expl
   assert.equal(lifecycle.inspect().pending, true);
 });
 
-test('an unsupported helper never sends the private runtime release signal', async () => {
+test('a helper below 4.11.0 never sends the private runtime release signal', async () => {
   const f = fixture({ depth: 0, allow_streaming: false, enabled: true });
   let emissions = 0;
   f.ctx.eventSource.emit = async () => { emissions++; };
-  f.version = '4.13.0';
+  f.version = '4.10.0';
   const lifecycle = createHelperLifecycle({ getHelper: () => f.helper, getContext: () => f.ctx,
     getRoot: () => ({ isConnected: true, querySelector: () => null }) });
   assert.equal(lifecycle.inspect().ok, false);
   assert.equal(lifecycle.inspect().canConfigure, undefined);
-  assert.match(lifecycle.inspect().reason, /4\.13\.0/);
-  await assert.rejects(lifecycle.release([0, 1]), /4\.13\.0/);
+  assert.match(lifecycle.inspect().reason, /4\.10\.0/);
+  await assert.rejects(lifecycle.release([0, 1]), /4\.10\.0/);
   assert.equal(emissions, 0);
   assert.equal(f.saves, 0);
+});
+
+test('4.11.0 and later release floors through the same audited signal', async () => {
+  for (const version of ['4.11.0', '4.12.1', '4.13.0']) {
+    const f = fixture({ depth: 0, allow_streaming: false, enabled: true });
+    const emitted = [];
+    f.ctx.eventSource.emit = async (event, id) => { emitted.push([event, id]); };
+    f.version = version;
+    const lifecycle = createHelperLifecycle({ getHelper: () => f.helper, getContext: () => f.ctx,
+      getRoot: () => ({ isConnected: true, querySelector: () => null }) });
+    assert.equal(lifecycle.inspect().ok, true, version);
+    await lifecycle.release([0, 1]);
+    assert.deepEqual(emitted, [['TH_REQUEST_RENDER_MESSAGE', 0], ['TH_REQUEST_RENDER_MESSAGE', 1]], version);
+  }
 });
 
 test('a known helper without its refresh API cannot begin automatic adaptation or release', async () => {

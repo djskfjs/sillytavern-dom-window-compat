@@ -3,9 +3,25 @@
  * message_recovery.ts defines TH_REQUEST_RENDER_MESSAGE; message.ts removes
  * the requested runtime when its message DOM is absent. Vue then unmounts
  * Iframe.vue and releases its resize listener and Blob URL.
- * This is an internal signal, not a documented unload API. Refuse unknown
- * versions rather than pretending that removing a DOM node releases Vue.
+ * This is an internal signal, not a documented unload API. 4.12.0 is the only
+ * version audited line by line; it is used for 4.11.0 and every later version
+ * as requested, without re-auditing each release. Versions below 4.11.0 stay
+ * refused rather than pretending that removing a DOM node releases Vue.
  */
+export const MIN_HELPER_VERSION = '4.11.0';
+export function readHelperVersion(helper) {
+  try { return helper?.getTavernHelperVersion?.(); } catch { return undefined; }
+}
+export function isSupportedHelperVersion(version) {
+  const match = typeof version === 'string' ? /^\s*(\d+)\.(\d+)(?:\.(\d+))?/.exec(version) : null;
+  if (!match) return false;
+  const parts = [Number(match[1]), Number(match[2]), Number(match[3] || 0)];
+  const minimum = [4, 11, 0];
+  for (let index = 0; index < 3; index++) {
+    if (parts[index] !== minimum[index]) return parts[index] > minimum[index];
+  }
+  return true;
+}
 export function createHelperLifecycle({ getRoot, getHelper, getContext, beforeRelease = () => {} }) {
   function inspect() {
     const ctx = getContext();
@@ -20,10 +36,9 @@ export function createHelperLifecycle({ getRoot, getHelper, getContext, beforeRe
       }
       return { ok: true, version: null, reason: '纯文字窗口' };
     }
-    let version;
-    try { version = helper.getTavernHelperVersion?.(); } catch {}
-    if (version !== '4.12.0') return { ok: false, version,
-      reason: `检测到酒馆助手 ${typeof version === 'string' && version ? version : '版本未读到'}；当前已适配 4.12.0。未修改助手设置。` };
+    const version = readHelperVersion(helper);
+    if (!isSupportedHelperVersion(version)) return { ok: false, version,
+      reason: `检测到酒馆助手 ${typeof version === 'string' && version ? version : '版本未读到'}；需要 ${MIN_HELPER_VERSION} 或更高版本。未修改助手设置。` };
     if (typeof ctx?.eventSource?.emit !== 'function') return { ok: false, version, reason: '未找到前端回收所需的酒馆事件接口。' };
     if (typeof helper.refreshOneMessage !== 'function') return { ok: false, version,
       reason: '未找到酒馆助手的前端恢复接口，已保留原聊天显示。' };

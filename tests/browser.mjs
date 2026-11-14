@@ -251,10 +251,17 @@ try {
     windowValid(await state(page), 5); await pass('扩展卸载与重新加载', page, errors);
   }
   {
-    const { page, errors } = await open('variant=compat&count=337&preload=10&helperVersion=99.0.0'), before = await state(page);
+    const { page, errors } = await open('variant=compat&count=337&preload=10&helperVersion=4.10.0'), before = await state(page);
     await page.evaluate(() => window.STDOMWindow.enable({ minWindow: 10, maxWindow: 10 })); const data = await state(page);
     assert.equal(data.audit.enabled, false); assert.deepEqual(data.ids, before.ids); assert.equal(data.data, before.data);
-    await pass('未知助手版本拒绝启动，避免半成品回收', page, errors);
+    await pass('低于 4.11.0 的助手版本拒绝启动，避免半成品回收', page, errors);
+  }
+  {
+    const { page, errors } = await open('variant=compat&count=337&preload=10&helperVersion=4.12.1');
+    await enable(page); await idle(page);
+    const data = await state(page); windowValid(data, 10);
+    assert.equal(data.audit.enabled, true);
+    await pass('4.12.1 等更高助手版本按同一信号开启窗口', page, errors);
   }
   {
     const { page, errors } = await open('variant=compat&count=337&preload=10'); await enable(page); await idle(page);
